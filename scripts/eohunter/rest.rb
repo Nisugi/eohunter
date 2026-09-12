@@ -26,7 +26,7 @@ module EO::Engine
       :resting_room, :return_waypoints, :hunting_room, :rally_rooms,
       :fog_return, :fog_optional, :fog_rift, :custom_fog,
       :resting_commands, :resting_scripts, :hunting_prep_commands, :hunting_scripts,
-      :wander_stance, :rest_interval, :sneaky, :encumbrance_grace, :sites,
+      :wander_stance, :rest_interval, :sneaky, :encumbrance_grace, :sites, :preparations,
       keyword_init: true
     ) do
       # The fried threshold; 101 (never) when the profile leaves it blank.
@@ -1022,6 +1022,10 @@ module EO::Engine
 
           @prep_script = name if wait_for_scripts
           Actions::Result.new(status: :success)
+        elsif line =~ Prepare::WORD
+          # the one word a preparation list knows besides script: a
+          # command confirmed by the player's own event (prepare.rb)
+          Prepare.run(world, @policy.preparations || {}, Regexp.last_match(1))
         else
           Actions::Command.new(world, command: line).call
         end

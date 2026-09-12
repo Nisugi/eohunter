@@ -143,10 +143,11 @@ The parts live in `scripts/eohunter/`, one file each, loaded in order by
 - `loadout.rb`: the optional between-fight right/left-hand policy. It
   compares live state without sending, then delegates one complete
   reconciliation to Lich's Stash API.
-- `actions.rb`, `combat.rb`, `maneuvers.rb`, `routines.rb`: the actions.
-  fput's bounded ladder and the three confirmation shapes; attack and cast;
-  maneuvers on Lich's PSM readers and mstrike; the rest of bigshot's
-  routine vocabulary.
+- `actions.rb`, `combat.rb`, `maneuvers.rb`, `routines.rb`, `prepare.rb`:
+  the actions. fput's bounded ladder and the three confirmation shapes;
+  attack and cast; maneuvers on Lich's PSM readers and mstrike; the rest
+  of bigshot's routine vocabulary; the `prepare <name>` word that sends a
+  command and awaits the player's own event (lich-5 #1608).
 - `targets.rb`, `flee.rb`, `rest.rb`, `loot.rb`, `maintain.rb`,
   `survival.rb`, `engage.rb`, `wander.rb`, `cleanse.rb`: the behaviors,
   each with its policy and its predicates.

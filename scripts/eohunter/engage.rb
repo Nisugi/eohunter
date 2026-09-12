@@ -27,11 +27,11 @@ module EO::Engine
     Policy = Struct.new(:routines, :quick_commands, :disable_commands, :priority, :hunting_stance, :wander_stance,
                         :wand_if_oom, :use_wracking, :wracking_spirit, :oom, :ambush, :quick,
                         :archery_aim, :aim, :tier3, :uac_smite, :uac_mstrike, :ammo_container, :fresh_wand_container,
-                        :dead_wand_container, :wand, :weapon_reaction, keyword_init: true) do
+                        :dead_wand_container, :wand, :weapon_reaction, :preparations, keyword_init: true) do
       def initialize(routines: {}, quick_commands: [], disable_commands: [], priority: false, hunting_stance: 'defensive',
                      wander_stance: 'defensive', wand_if_oom: false, use_wracking: false, wracking_spirit: 0, oom: 0, ambush: [], quick: false,
                      archery_aim: [], aim: [], tier3: 'punch', uac_smite: false, uac_mstrike: false, ammo_container: nil,
-                     fresh_wand_container: nil, dead_wand_container: nil, wand: [], weapon_reaction: true) = super
+                     fresh_wand_container: nil, dead_wand_container: nil, wand: [], weapon_reaction: true, preparations: {}) = super
 
       # find_routine: the letter's list, else the default (a).
       #
@@ -798,7 +798,7 @@ module EO::Engine
       # Lines sent as an Attack.
       VERBS = /^(?:attack|kill|jab|punch|kick|grapple|hurl)\b/
       # Lines that do not get the hunting stance first.
-      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon)/i
+      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon|prepare)/i
       # Floor objects that mean a weed is already down (cmd_weed 4797).
       WEEDS = /\b(?:vine|bramble|widgeonweed|vathor club|swallowwort|smilax|creeper|briar|ivy|tumbleweed)\b/
       # A spell line: optional incant, the number, then the cast word and
@@ -832,7 +832,7 @@ module EO::Engine
       # "allycast NNN name": a support spell on a named group member.
       ALLY_CAST = /^allycast\s+(\d+)\s+(.+)$/i
       # Words that Routines (routines.rb) handles; fire has its aim there too
-      UNSUPPORTED = /^(?:resonance|jewel|throw|wand|wandolier|unarmed|smite|caststop|unravel|barddispel|stomp|leech|rapid(?:fire)?|depress|phase|curse|efury|dhurl|briar|assume|wield|store|tether|sacrifice|nudgeweapons?|berserk|force|eachtarget|dislodge|fire|celerity|haste|506|slayer|240|tonis|1035)\b/i
+      UNSUPPORTED = /^(?:resonance|jewel|throw|wand|wandolier|unarmed|smite|caststop|unravel|barddispel|stomp|leech|rapid(?:fire)?|depress|phase|curse|efury|dhurl|briar|assume|wield|store|tether|sacrifice|nudgeweapons?|berserk|force|eachtarget|dislodge|fire|celerity|haste|506|slayer|240|tonis|1035|prepare)\b/i
 
       # @param policy [Engage::Policy]
       # @param targets_policy [Targets::Policy]

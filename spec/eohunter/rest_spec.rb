@@ -344,6 +344,26 @@ RSpec.describe EO::Engine::Behaviors::Rest do
     expect(scripts.started).to eq([['eherbs', nil], ['eloot', 'sell']])
   end
 
+  # prepare.rb: the one word a preparation list knows besides script.
+  it 'runs a prepare line through its entry and sends every other line as a command' do
+    policy.preparations = EO::Engine::Prepare.parse('crystal' => { 'perform' => 'feed my crystal', 'result' => 'user_feed_result' })
+    sent = []
+    allow_any_instance_of(EO::Engine::Actions::Command).to receive(:send_through_ladder) { |_a, cmd| sent << cmd; 'ok' }
+    allow_any_instance_of(EO::Engine::Actions::Prepare).to receive(:game_send) do |_a, cmd|
+      sent << cmd
+      EO::Engine::Events.emit(:user_feed_result, ok: true)
+      'ok'
+    end
+    allow_any_instance_of(EO::Engine::Actions::Prepare).to receive(:sleep)
+    allow_any_instance_of(EO::Engine::Actions::Prepare).to receive(:live_target_ids).and_return(nil)
+    lines = ['prepare crystal', 'stand', 'prepare ward']
+    expect(rest.send(:step_prep, world, lines, [], :rested).reason).to eq(:confirmed)
+    expect(rest.send(:step_prep, world, lines, [], :rested)).to be_success
+    expect(rest.send(:step_prep, world, lines, [], :rested).reason).to eq(:unknown_preparation)
+    expect(sent).to eq(['feed my crystal', 'stand'])
+    EO::Engine::Events.reset!
+  end
+
   it 'polls resting readiness without blocking engine heartbeat ticks' do
     clock = OpenStruct.new(now: Time.at(1000))
     policy.rest_interval = 30

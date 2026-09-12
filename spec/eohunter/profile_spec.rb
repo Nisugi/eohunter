@@ -94,6 +94,16 @@ RSpec.describe EO::Engine::Profile do
     expect(described_class.new({}).loadout_selection).not_to be_managed
   end
 
+  it 'parses the preparations into entries, and rejects a malformed one at load' do
+    raw['preparations'] = { 'crystal' => { 'perform' => 'feed my crystal', 'result' => 'user_feed_result', 'expect' => { 'ok' => true } } }
+    expect(profile.preparations.keys).to eq(['crystal'])
+    expect(profile.rest_policy.preparations).to equal(profile.preparations)
+    expect(profile.engage_policy.preparations).to equal(profile.preparations)
+    expect(described_class.new({}).preparations).to eq({})
+    expect { described_class.new({ 'preparations' => { 'crystal' => { 'result' => 'user_feed_result' } } }) }
+      .to raise_error(ArgumentError, /preparations.crystal needs a perform/)
+  end
+
   it 'rejects malformed selection configuration during profile construction' do
     expect { described_class.new({ 'hunting_loadout_sets' => [] }) }.to raise_error(ArgumentError, /hunting_loadout_sets/)
     expect { described_class.new({ 'hunting_loadout_rules' => [{ 'set' => 'missing', 'type' => 'undead' }] }) }

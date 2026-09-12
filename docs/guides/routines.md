@@ -109,6 +109,7 @@ quickstrike rules and the `mstrike_mob` floor.
 | `rapid`, `rapidfire`, `throw`, `dislodge`, `jewel <mnemonic>`, `briar <weapon>`, `assume <aspect>` | the rest of bigshot's cmd_* table |
 | `wield <noun> [left]`, `store [left]` | hands, through Lich's Stash |
 | `sacrifice`, `stomp`, `leech`, `nudgeweapons`, `berserk` | as in bigshot |
+| `prepare <name>` | a `preparations` entry from the profile: send its command, await the player's own event, check the payload ([profiles](profiles.md#preparations)) |
 | `force <cmd> until 120` | repeat a command until its endroll reaches the goal |
 | `eachtarget <cmd>` | the command once at every valid creature |
 | `celerity <cmd>`, `slayer <cmd>`, `tonis <cmd>` (or 506, 240, 1035) | the prefix spell first, then the command |

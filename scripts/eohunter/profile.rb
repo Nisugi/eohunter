@@ -40,7 +40,7 @@ module EO::Engine
       'field_return_waypoint_ids' => [:strict_rooms, []], 'field_rallypoint_room_ids' => [:strict_rooms, []],
       'field_hunting_prep_commands' => [:split_xx, []], 'field_rest_timeout_seconds' => [:seconds, 900.0],
       'town_rest_required_eval' => [:string, nil], 'after_town_rest' => [:string, 'resume'],
-      'combat_buffs' => [:structured, {}],
+      'combat_buffs' => [:structured, {}], 'preparations' => [:structured, {}],
       'crushing_dread' => [:to_i, 0], 'wot_poison' => [:bool, false], 'confusion' => [:bool, false], 'box_in_hand' => [:bool, false],
       'hunting_room_id' => [:room, nil], 'rallypoint_room_ids' => [:rooms, []], 'hunting_boundaries' => [:rooms, []],
       'rest_till_exp' => [:to_i, 0], 'rest_till_mana' => [:to_i, 0], 'rest_till_spirit' => [:to_i, 0], 'rest_till_percentstamina' => [:to_i, 0],
@@ -113,6 +113,7 @@ module EO::Engine
       end
       rest_sites
       buff_policy
+      preparations
       if buff_policy.enabled? && !(self['resting_room_id'].is_a?(Integer) && self['resting_room_id'].positive?)
         raise ArgumentError, 'combat_buffs requires a positive resting_room_id for safe recovery'
       end
@@ -149,6 +150,9 @@ module EO::Engine
     # @return [BuffPolicy::Policy] validated opt-in combat requirements
     def buff_policy = @buff_policy ||= BuffPolicy::Policy.new(self['combat_buffs'])
 
+    # @return [Hash{String => Prepare::Entry}] the `prepare <name>` entries, validated
+    def preparations = @preparations ||= Prepare.parse(self['preparations'])
+
     # The Rest behavior's Policy from the rest, fog, resting-room and
     # prep keys. rest_interval is fixed at 30.
     #
@@ -171,7 +175,8 @@ module EO::Engine
         fog_rift: self['fog_rift'], custom_fog: self['custom_fog'],
         resting_commands: self['resting_commands'], resting_scripts: self['resting_scripts'],
         hunting_prep_commands: self['hunting_prep_commands'], hunting_scripts: self['hunting_scripts'],
-        wander_stance: self['wander_stance'], rest_interval: 30, sneaky: self['sneaky_sneaky']
+        wander_stance: self['wander_stance'], rest_interval: 30, sneaky: self['sneaky_sneaky'],
+        preparations: preparations
       )
     end
 
@@ -282,7 +287,7 @@ module EO::Engine
                          archery_aim: self['archery_aim'], aim: self['aim'], tier3: self['tier3'], uac_smite: self['uac_smite'],
                          uac_mstrike: self['uac_mstrike'], ammo_container: self['ammo_container'],
                          fresh_wand_container: self['fresh_wand_container'], dead_wand_container: self['dead_wand_container'],
-                         wand: self['wand'], weapon_reaction: self['weapon_reaction'])
+                         wand: self['wand'], weapon_reaction: self['weapon_reaction'], preparations: preparations)
     end
 
     # The Mstrike Policy from the mstrike_* keys.

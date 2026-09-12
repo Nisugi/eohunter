@@ -127,6 +127,7 @@ module EO::Engine
         when /^dislodge\s?(.*)/ then Actions::Dislodge.new(world, target: target, state: state, locations: Regexp.last_match(1)).call
         when /^force\s+(.*)\s+(?:till|until)\s+(\d+)/i then force(engage, world, Regexp.last_match(1), Regexp.last_match(2).to_i, line)
         when /^eachtarget\s+(.*)/i then each_target(engage, world, Regexp.last_match(1), line)
+        when Prepare::WORD then Prepare.run(world, policy.preparations || {}, Regexp.last_match(1))
         when PREFIX then prefixed(engage, world, Regexp.last_match(1), Regexp.last_match(2), line)
         end
       end

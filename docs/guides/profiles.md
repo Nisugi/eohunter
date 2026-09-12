@@ -165,6 +165,7 @@ overweight; the grace does not relax recovery thresholds.
 |---|---|---|---|
 | `hunting_prep_commands` | split_xx | none | Rest: sent before walking out |
 | `hunting_scripts` | split | none | Rest: started before walking out, stopped at rest |
+| `preparations` | structured | none | the `prepare <name>` word in any command list; see [Preparations](#preparations) |
 | `hunting_stance` | stance | defensive | Engage: set before each routine line that needs it |
 | `wander_stance` | stance | defensive | Wander, Loot, Rest, Survival: the stance between fights |
 | `stand_stance` | stance | defensive | Survival: the stance to stand up in |
@@ -202,6 +203,37 @@ overweight; the grace does not relax recovery thresholds.
 | `loot_script` | string | none | Loot: a script to loot with, instead of `loot` |
 | `delay_loot` | bool | false | Loot: wait fifteen seconds after a kill before looting |
 | `loot_stance` | bool | false | Loot: switch to the wander stance to loot |
+
+### Preparations
+
+An item that has to be fed, charged or rubbed before a hunt answers with
+a line only the player knows. Lich's supplement file (lich-5 #1608,
+`DATA_DIR/combat/defs.yaml`) teaches its message scanner that line and
+the `user_` event it means; a `preparations` entry here names the
+command to send, the event that answers it and what its payload must
+say. The word `prepare <name>` runs the entry from `hunting_commands`,
+`hunting_prep_commands`, `resting_commands` or the field prep list.
+
+```yaml
+preparations:
+  crystal:
+    perform: feed my crystal      # sent through the refusal ladder
+    result:  user_feed_result     # the event the player's defs.yaml defines
+    expect:  { ok: true }         # every key must equal; omitted, the event alone confirms
+    timeout: 6                    # seconds; 8 when omitted
+
+hunting_prep_commands: prepare crystal
+hunting_commands: 702, prepare crystal(repeatdelay300), attack
+```
+
+The line succeeds with `:confirmed` when the event arrives and satisfies
+`expect`; it fails with `:denied` when the event arrives and does not,
+and times out with `:no_confirmation` on silence. A name the profile does
+not define fails with `:unknown_preparation` and sends nothing. An entry
+missing `perform` or `result` is refused when the profile loads. In a
+routine the word is stance-free and wants a modifier such as
+`repeatdelay`, or it runs every pass. The two halves side by side are in
+[preparations.example.yaml](../preparations.example.yaml).
 
 ### Hunting loadout
 

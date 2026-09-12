@@ -43,6 +43,7 @@ module ::EO
       world
       targets
       actions
+      prepare
       combat
       maneuvers
       behavior

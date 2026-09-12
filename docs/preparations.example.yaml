@@ -1,0 +1,108 @@
+# Example preparation words: the two halves of one item-preparation bridge.
+#
+# The top half is what the player writes in Lich's supplement file
+# (DATA_DIR/combat/defs.yaml, lich-5 #1608): Lich recognises a line and
+# emits a fact. The bottom half is what the same player writes in the
+# EOHunter profile: a preparation entry names the command to send, the
+# fact to wait for, and what its payload must say. EOHunter never learns
+# the item; the word "prepare <name>" runs the entry from either list.
+#
+# Every event and family a player adds carries the user_ prefix. Shipped
+# events (swift_justice below) may be reused if the payload keeps their
+# contract.
+
+# ---------------------------------------------------------------------------
+# DATA_DIR/combat/defs.yaml  (Lich's side; the messages: section only)
+# ---------------------------------------------------------------------------
+messages:
+  # 1. A feed that either takes or does not. Two defs, one event, one
+  #    literal fact each.
+  - family: user_item_prep
+    event: user_feed_result
+    patterns: ['You feed the (?<what>.+?) and it hums softly\.']
+    captures: { what: what }
+    values:   { ok: true }
+  - family: user_item_prep
+    event: user_feed_result
+    patterns: ['You feed the (?<what>.+?) and it does nothing\.']
+    captures: { what: what }
+    values:   { ok: false }
+
+  # 2. A toggle whose two lines say which way it went.
+  - family: user_item_prep
+    event: user_ward_state
+    patterns: ['You rub the (?<what>.+?) and a faint shimmer surrounds you\.']
+    captures: { what: what }
+    values:   { active: true }
+  - family: user_item_prep
+    event: user_ward_state
+    patterns: ['You rub the (?<what>.+?), but the shimmer fades\.']
+    captures: { what: what }
+    values:   { active: false }
+
+  # 3. A counter. The number is a typed capture; a line whose number does
+  #    not parse emits nothing rather than a zero.
+  - family: user_item_prep
+    event: user_orb_charges
+    patterns: ['The (?<what>.+?) pulses (?<n>\d+) times?\.']
+    captures:
+      what:    what
+      charges: { from: n, type: integer }
+
+  # 4. A shipped event, one more line for it. The contract wants
+  #    charges as an integer, so the capture is typed.
+  - family: marks
+    event: swift_justice
+    patterns: ['Your Swift Justice charges are restored to (?<n>\d+)\.']
+    captures:
+      charges: { from: n, type: integer }
+
+# ---------------------------------------------------------------------------
+# The EOHunter profile  (our side)
+# ---------------------------------------------------------------------------
+preparations:
+  # "prepare crystal": send, wait up to six seconds for user_feed_result,
+  # succeed when ok is true. ok false is :failed with reason :denied and
+  # the event attached; silence is :timeout, :no_confirmation.
+  crystal:
+    perform: feed my crystal
+    result:  user_feed_result
+    expect:  { ok: true }
+    timeout: 6
+
+  # The toggle. Same shape; a false payload is a denial, not a timeout.
+  ward:
+    perform: rub my ward
+    result:  user_ward_state
+    expect:  { active: true }
+
+  # A counter. expect is equality only in the first pass, so this entry
+  # confirms on the event alone and leaves the number to the latch. When
+  # a profile needs "charges at least 3" the entry grows a comparison;
+  # the latch is already keeping the payload for it.
+  orb:
+    perform: tap my orb
+    result:  user_orb_charges
+    timeout: 4
+
+  # A shipped event reused. Nothing distinguishes it from a user_ event
+  # here; the contract check happened in Lich when the file loaded.
+  justice:
+    perform: recharge my badge
+    result:  swift_justice
+    expect:  { charges: 3 }
+
+  # The noun matters when two items answer with the same line. what is a
+  # capture the def above publishes, so it can be expected like any key.
+  second_crystal:
+    perform: feed my second crystal
+    result:  user_feed_result
+    expect:  { ok: true, what: second crystal }
+    timeout: 6
+
+# The lists, using the entries by name. A preparation reads best before
+# the hunt, in the prep list; in a routine it wants a modifier so it does
+# not run every pass.
+hunting_prep_commands: prepare crystal, prepare ward, prepare orb
+hunting_commands: 702, prepare ward(repeatdelay300), attack, attack
+resting_commands: prepare justice

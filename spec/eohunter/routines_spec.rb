@@ -286,6 +286,22 @@ RSpec.describe 'the routine words in routines.rb' do
     expect(sent).to eq([])
   end
 
+  # prepare.rb: a routine line runs a profile preparation, and the word is
+  # stance-free (a feed does not want the hunting stance first).
+  it 'runs a preparation entry by name from a routine line' do
+    policy.preparations = EO::Engine::Prepare.parse('crystal' => { 'perform' => 'feed my crystal', 'result' => 'user_feed_result', 'expect' => { 'ok' => true } })
+    allow_any_instance_of(EO::Engine::Actions::Prepare).to receive(:game_send) do |_a, cmd|
+      sent << cmd
+      EO::Engine::Events.emit(:user_feed_result, ok: true, raw: 'hums')
+      'hums'
+    end
+    allow_any_instance_of(EO::Engine::Actions::Prepare).to receive(:live_target_ids).and_return(nil)
+    expect(run('prepare crystal').reason).to eq(:confirmed)
+    expect(sent).to eq(['feed my crystal'])
+    expect(run('prepare ward').reason).to eq(:unknown_preparation)
+    expect('prepare crystal').to match(EO::Engine::Behaviors::Engage::STANCE_FREE)
+  end
+
   it "stores a hand through Lich's Stash, on the game's STORE settings" do
     stashed = []
     allow_any_instance_of(EO::Engine::Actions::Store).to receive(:stash) { |_a, hand| stashed << hand }
