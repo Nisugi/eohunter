@@ -23,7 +23,10 @@ RSpec.describe EO::Engine::Behaviors::Maintain, 'combat buff policy' do
   let(:cast) { double('Cast', call: EO::Engine::Actions::Result.new(status: :success)) }
 
   before { allow(EO::Engine::Actions::Cast).to receive(:new).and_return(cast) }
-  after { EO::Engine::Events.reset! }
+  # Maintain registers the bless-fade rules on Watch (maintain.rb 749);
+  # left behind, they make a later watch spec install a hook it did not
+  # ask for.
+  after { EO::Engine::Events.reset!; EO::Engine::Watch.clear! }
 
   it 'uses the existing casting action once and waits for observation before retrying' do
     expect(maintain.wants_control?(world)).to be true
