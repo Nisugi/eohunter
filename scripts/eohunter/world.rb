@@ -307,6 +307,47 @@ module EO::Engine
       []
     end
 
+    # Whether every current group member is off the per-target cooldown a
+    # group (EVOKE) casting of the spell starts. Lich stamps these in the
+    # infomon parser the moment the caster's own "your group" message is
+    # seen, so the answer is current as of the last line read.
+    #
+    # All rather than any: the group is cast on together, so the members
+    # go on cooldown together and come off together. Waiting for all of
+    # them costs nothing in the ordinary case and avoids spending a whole
+    # evoke to refresh one member.
+    #
+    # A group of one - us, ungrouped - reads as ready.
+    #
+    # @param num [Integer] the spell number
+    # @return [Boolean] false when any member is still locked out
+    def group_evoke_ready?(num)
+      spell = ::Spell[num]
+      return false if spell.nil?
+
+      ::Lich::Gemstone::Group.members.map(&:noun).compact.all? do |name|
+        ::Lich::Gemstone::Group.spell_cooldown_ready?(spell, name)
+      end
+    rescue StandardError
+      false
+    end
+
+    # Whether Lich knows how long a group casting of the spell locks its
+    # targets out. Read from the spell's effect-list data, so it is nil
+    # until that data lands for the spell; nothing is recorded for a
+    # spell without it, and the cooldown store stays empty forever.
+    #
+    # @param num [Integer] the spell number
+    # @return [Boolean] true when the cooldown length is known
+    def group_cooldown_known?(num)
+      spell = ::Spell[num]
+      return false if spell.nil? || !spell.respond_to?(:group_cooldown)
+
+      spell.group_cooldown.to_i.positive?
+    rescue StandardError
+      false
+    end
+
     # Lich's Group: is the group open to joiners. Lich sends GROUP once if
     # it has never looked, then reads the status from the feed.
     # @return [Boolean]

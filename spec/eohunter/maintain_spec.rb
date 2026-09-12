@@ -10,6 +10,7 @@ FakeSpell = Struct.new(:num, :name, :known, :active, :affordable, :mana_cost, :l
   def affordable? = affordable
   def cast(*_args) = (@casts = (@casts || 0) + 1; 'Cast Roundtime 3 Seconds.')
   def force_channel(*_args) = cast
+  def force_evoke(*_args) = cast
   def casts = @casts || 0
 end unless defined?(FakeSpell)
 
@@ -478,5 +479,120 @@ RSpec.describe 'the society readers the Wrack action resolves' do
     stub_const('Lich::Gemstone::Societies', Module.new { const_set(:CouncilOfLight, :col_reader) })
     expect(action.send(:col)).to eq(:col_reader)
     expect(action.send(:voln)).to be_nil
+  end
+end
+
+RSpec.describe EO::Engine::Maintain::Signs, 'the evoke entry' do
+  it 'parses "<num> evoke", case insensitively, as an evoke of that spell' do
+    signs = described_class.parse(['215 evoke', '211 EVOKE', '506 evoke'])
+    expect(signs.map(&:kind)).to eq(%i[evoke evoke evoke])
+    expect(signs.map(&:num)).to eq([215, 211, 506])
+  end
+
+  it 'leaves a plain spell number alone, so 215 and "215 evoke" are different entries' do
+    plain, evoke = described_class.parse(['215', '215 evoke'])
+    expect(plain.kind).to eq(:spell)
+    expect(evoke.kind).to eq(:evoke)
+    expect(plain.num).to eq(evoke.num)
+  end
+
+  it 'is anchored, unlike the 650 and 515 patterns beside it' do
+    expect(described_class.parse(['215evoke']).first.kind).to eq(:spell)
+    expect(described_class.parse(['evoke 215']).first.kind).to eq(:spell)
+  end
+
+  it 'leaves 650 and 515 to their own patterns, which carry their own evoke word' do
+    expect(described_class.parse(['650 air evoke']).first.kind).to eq(:assume)
+    expect(described_class.parse(['515 evoke']).first.kind).to eq(:rapid)
+  end
+end
+
+RSpec.describe EO::Engine::Behaviors::Maintain, 'group evoke' do
+  let(:me) do
+    OpenStruct.new(mana: 100, stamina: 100, max_stamina: 100, spirit: 10, level: 50, voln_favor: 0, blessings_ranks: 0,
+                   dead?: false, muckled?: false, in_rt?: false, in_cast_rt?: false, profession: 'Cleric', name: 'Tester')
+  end
+  let(:spells) { {} }
+  let(:hands) { OpenStruct.new(right: OpenStruct.new(id: nil, noun: ''), left: OpenStruct.new(id: nil, noun: '')) }
+  # A ? method cannot be an OpenStruct write target, so the two answers
+  # live in flags the stub closes over and the tests flip.
+  let(:flags) { { known: true, ready: true } }
+  let(:world) do
+    w = OpenStruct.new(me: me, spell: spells, hands: hands)
+    f = flags
+    w.define_singleton_method(:group_cooldown_known?) { |_num| f[:known] }
+    w.define_singleton_method(:group_evoke_ready?) { |_num| f[:ready] }
+    w
+  end
+  let(:policy) { EO::Engine::Maintain::Policy.new(signs: ['215 evoke']) }
+  let(:state) { EO::Engine::Maintain::State.new }
+  let(:clock) { OpenStruct.new(now: Time.at(10_000)) }
+  let(:maintain) { described_class.new(policy: policy, state: state, clock: clock) }
+
+  def spell(num, **over)
+    spells[num] = FakeSpell.new(num: num, name: "Spell #{num}", known: true, active: false, affordable: true,
+                                mana_cost: 15, last_cast: Time.at(0), **over)
+  end
+
+  before do
+    table = spells
+    me.define_singleton_method(:spell_active?) { |n| table[n]&.active? || false }
+    me.define_singleton_method(:effect_active?) { |_n| false }
+    me.define_singleton_method(:cooldown_active?) { |_n| false }
+    me.define_singleton_method(:buff_time_left) { |_n| 0.0 }
+    stub_const('Spell', Class.new { def self.[](_n); end })
+    allow(Spell).to receive(:[]) { |n| spells[n] }
+  end
+
+  after { EO::Engine::Events.reset!; EO::Engine::Watch.clear! }
+
+  it 'evokes while the spell is already up on us, which a plain sign never would' do
+    spell(215, active: true)
+    expect(maintain.wants_control?(world)).to be true
+    expect(maintain.tick(world)).to be_success
+    expect(spells[215].casts).to eq(1)
+  end
+
+  it 'holds while any group member is still on the cooldown' do
+    spell(215)
+    flags[:ready] = false
+    expect(maintain.wants_control?(world)).to be false
+    expect(spells[215].casts).to eq(0)
+  end
+
+  it 'paces on a floor when Lich has no cooldown length for the spell' do
+    spell(215)
+    flags[:known] = false
+    # nothing recorded: the readiness check would say ready forever
+    flags[:ready] = true
+
+    expect(maintain.wants_control?(world)).to be true
+    expect(maintain.tick(world)).to be_success
+    expect(state.last_evoke[215]).to eq(clock.now)
+
+    # the very next tick is refused by the floor, not by readiness
+    spells[215].last_cast = Time.at(0)
+    expect(maintain.wants_control?(world)).to be false
+
+    clock.now = clock.now + EO::Engine::Maintain::Signs::EVOKE_FLOOR
+    expect(maintain.wants_control?(world)).to be true
+  end
+
+  it 'does not pace on the floor when the cooldown is tracked' do
+    spell(215)
+    expect(maintain.wants_control?(world)).to be true
+    expect(maintain.tick(world)).to be_success
+
+    # tracked: readiness alone decides, and it still says ready
+    spells[215].last_cast = Time.at(0)
+    expect(maintain.wants_control?(world)).to be true
+  end
+
+  it 'refuses an unknown or unaffordable spell the way a plain sign does' do
+    spell(215, known: false)
+    expect(maintain.wants_control?(world)).to be false
+
+    spell(215, affordable: false)
+    expect(maintain.wants_control?(world)).to be false
   end
 end

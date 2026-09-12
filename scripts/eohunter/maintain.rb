@@ -51,12 +51,18 @@ module EO::Engine
       attr_accessor :blessed_902, :blessed_411, :adrenal_at
       # @return [Array<String>] the item ids still wanting a bless, newest last
       attr_reader :bless_wanted
+      # When each spell was last group evoked, by spell number. Only read
+      # for a spell Lich has no group cooldown length for, where it is the
+      # only thing pacing the casting.
+      # @return [Hash{Integer => Time}]
+      attr_reader :last_evoke
 
       def initialize
         @blessed_902 = false
         @blessed_411 = false
         @bless_wanted = []
         @adrenal_at = nil
+        @last_evoke = {}
       end
     end
 
@@ -66,7 +72,7 @@ module EO::Engine
     #   @return [String] the raw profile entry, stripped
     # @!attribute kind
     #   @return [Symbol] :assume, :rapid, :shout, :surge, :burst, :channel,
-    #     :bless_902, :bless_411 or :spell
+    #     :bless_902, :bless_411, :evoke or :spell
     # @!attribute num
     #   @return [Integer] the spell number
     # @!attribute args
@@ -94,8 +100,11 @@ module EO::Engine
 
       # The profile's signs list as Signs, one per entry, kinds by the
       # patterns cast_signs matches: "650 <aspect> <aspect>", 515 or
-      # "rapid(fire)", 122420, 9605, 9625, 909, 902, 411, else a spell
-      # number.
+      # "rapid(fire)", "<num> evoke", 122420, 9605, 9625, 909, 902, 411,
+      # else a spell number.
+      #
+      # "<num> evoke" is anchored, unlike the 650 and 515 patterns it sits
+      # beside, so it cannot match a number that merely contains the word.
       #
       # @param entries [Array<String>, nil] the profile's signs list
       # @return [Array<Sign>] one per entry
@@ -105,6 +114,7 @@ module EO::Engine
           case entry
           when /\b650\s?(\w+)?\s?(\w+)?\s?/ then Sign.new(entry: entry, kind: :assume, num: 650, args: [Regexp.last_match(1), Regexp.last_match(2)])
           when /\b(?:515|rapid|rapidfire)(?:\s?\(?(\w+)\)?)?/ then Sign.new(entry: entry, kind: :rapid, num: 515, args: [Regexp.last_match(1)])
+          when /^(\d+)\s+evoke$/i then Sign.new(entry: entry, kind: :evoke, num: Regexp.last_match(1).to_i)
           when /^122420$/ then Sign.new(entry: entry, kind: :shout, num: 122420)
           when /^9605$/ then Sign.new(entry: entry, kind: :surge, num: 9605)
           when /^9625$/ then Sign.new(entry: entry, kind: :burst, num: 9625)
@@ -116,8 +126,16 @@ module EO::Engine
         end
       end
 
+      # The floor between evokes of a spell Lich has no group cooldown
+      # length for. Nothing is recorded for such a spell, so every member
+      # reads as ready forever and the only thing standing between us and
+      # an evoke every tick is this. 180 s is what the spells that do
+      # carry the data use (215 and 211).
+      EVOKE_FLOOR = 180
+
       # Why a sign is due now, or nil: :cast, :wrack (unaffordable and
-      # wracking is on), :maneuver, :shout, :channel. cast_signs 7372-7490.
+      # wracking is on), :maneuver, :shout, :channel, :evoke.
+      # cast_signs 7372-7490.
       #
       # @bigshot cast_signs
       # @param world [World]
@@ -152,7 +170,53 @@ module EO::Engine
         # unguarded (check_902_411 9112) but self-paces on roundtime.
         when :bless_902, :bless_411
           next_bless_due(world, sign, state)
+        when :evoke then evoke_due(world, sign, policy, state, now: now, renewal_cost: renewal_cost)
         else spell_due(world, sign.num, policy, now: now, renewal_cost: renewal_cost)
+        end
+      end
+
+      # A group EVOKE is due when the spell could be cast at all and every
+      # group member is off the per-target cooldown it starts.
+      #
+      # Deliberately not gated on the spell being inactive on us, the way
+      # a plain sign is: the caster almost always already has it up from
+      # their own casting, so that test would mean an evoke never fires.
+      # What makes an evoke worth doing is the group's cooldowns, not our
+      # own buff.
+      #
+      # When Lich has no cooldown length for the spell nothing is ever
+      # recorded, so the readiness check would answer true forever. Rather
+      # than let the feature die there, fall back to a fixed floor between
+      # castings - a slow recast instead of one every tick.
+      #
+      # @param world [World]
+      # @param sign [Sign] the "<num> evoke" entry
+      # @param policy [Policy] the maintain settings
+      # @param state [State] carries the last evoke per spell
+      # @param now [Time] the clock
+      # @param renewal_cost [Integer] a Bard's song renewal cost, 0 otherwise
+      # @return [Symbol, nil] :evoke, :wrack or nil
+      def evoke_due(world, sign, policy, state, now:, renewal_cost:)
+        num = sign.num
+        s = world.spell[num]
+        return nil if s.nil? || !s.known?
+
+        me = world.me
+        cost = s.mana_cost.to_i
+        return nil if me.spell_active?(597) && cost.positive? && cost + 5 > me.mana
+
+        real_cost = cost > 1 ? cost : 0
+        return :wrack if !s.affordable? && real_cost > me.mana && policy.use_wracking &&
+                         Actions::Wrack.possible?(world, policy)
+        return nil unless s.affordable?
+        return nil if renewal_cost.positive? && me.mana < renewal_cost + cost
+        return nil unless now > s.last_cast + 1.5
+
+        if world.group_cooldown_known?(num)
+          world.group_evoke_ready?(num) ? :evoke : nil
+        else
+          last = state.last_evoke[num]
+          last.nil? || now - last >= EVOKE_FLOOR ? :evoke : nil
         end
       end
 
@@ -650,6 +714,7 @@ module EO::Engine
           world.spell[909].force_channel
           Actions::Result.new(status: :success, reason: :channel_909)
         when :cast then cast_sign(world, subject)
+        when :evoke then evoke_sign(world, subject)
         when :assume then Actions::Assume.new(world, aspect: subject.args[0].to_s, extra: subject.args[1].to_s).call
         end
       end
@@ -718,6 +783,19 @@ module EO::Engine
           @state.bless_wanted.clear
           Events.emit(:maintain_stuck, reason: 'No blessing on weapon')
         end
+        result
+      end
+
+      # A group EVOKE, sent at ourselves: the game spreads it to the group.
+      #
+      # The stamp is kept whatever the result. A refused evoke that still
+      # reached the game may well have started the cooldown anyway, and
+      # for a spell with no cooldown data this stamp is the only pacing
+      # there is - not recording it would retry every tick.
+      def evoke_sign(world, sign)
+        target = world.me.name.to_s
+        result = Actions::Cast.new(world, spell: sign.num, target: target, extra: 'evoke').call
+        @state.last_evoke[sign.num] = @clock.now
         result
       end
 
