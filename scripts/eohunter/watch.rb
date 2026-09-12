@@ -175,9 +175,10 @@ module EO::Engine
         tracker.enable! unless tracker.enabled?
         tracker.configure(emit_attacks: true) unless tracker.settings[:emit_attacks]
         @handlers = [
-          tracker.on(*::Lich::Gemstone::Combat::Messages.events, name: "#{NAME}:messages") { |type, data| message(type, data) },
+          subscribe_messages(tracker),
           tracker.on(:ucs, name: "#{NAME}:ucs") { |_type, data| ucs(data) },
-          tracker.on(:attack, name: "#{NAME}:attack") { |_type, data| attack(data) }
+          tracker.on(:attack, name: "#{NAME}:attack") { |_type, data| attack(data) },
+          tracker.on(:definitions_reloaded, name: "#{NAME}:reload") { |*| resubscribe_messages(tracker) }
         ]
         return if rules.empty?
 
@@ -200,6 +201,22 @@ module EO::Engine
       def installed? = @handlers.any?
 
       private
+
+      # Every message event Lich knows right now, under one name. The
+      # list is read at call time: a player's supplement file (lich-5
+      # #1608) adds user_ events to it, at login and on a reload.
+      def subscribe_messages(tracker)
+        tracker.on(*::Lich::Gemstone::Combat::Messages.events, name: "#{NAME}:messages") { |type, data| message(type, data) }
+      end
+
+      # Lich's :definitions_reloaded: the event list may have grown or
+      # shrunk, so enumerate it again. The payload (files, supplement
+      # counts) is not needed for that. Lich replaced the handler by
+      # name; keep our copy current so uninstall! takes down the live
+      # one rather than the block it superseded.
+      def resubscribe_messages(tracker)
+        @handlers[0] = subscribe_messages(tracker)
+      end
 
       # The disarm's moment (ecleanse set_hooks: the hands and the room).
       def disarm_data

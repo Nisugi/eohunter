@@ -117,6 +117,12 @@ events: an incoming swing, an ally's attack, a disarm, a hive trap, an
 arriving ambusher, the endroll of our own attack. Behaviors and actions
 subscribe to what they need and unsubscribe when done.
 
+The message events are enumerated from Lich at install, and again when
+Lich announces a definitions reload (lich-5 #1608, a player's supplement
+file). A `user_` event the player adds mid-session reaches the bus under
+its own name from the next reload on; the re-subscription replaces by
+name, so nothing is delivered twice.
+
 ## Travel
 
 A trip is go2 started with a room, supervised one tick at a time. One

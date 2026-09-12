@@ -31,6 +31,7 @@ the sentinels; the full list below is what the engine actually uses.
 | #1589 | society `command` readers | Wrack, the symbols and sigils |
 | #1590 | `Spell.results_regex` | cast confirmation |
 | #1591 | `Group.join` | the follower's join |
+| #1608 | `messages:` in the player's supplement file, `:definitions_reloaded` | the watch's re-subscription; optional |
 | #1575 | opt-in bounded script execution guards (ATARI) | the LAB controller only |
 | #1576 | combat observation provenance (ATARI) | the LAB controller only |
 | #1577 | static-only map route selection (ATARI) | the LAB controller only |

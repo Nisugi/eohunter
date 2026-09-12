@@ -27,7 +27,28 @@ RSpec.describe EO::Engine::Watch do
     expect(tracker.enabled?).to be true
     expect(tracker.settings[:emit_attacks]).to be true
     expect(tracker.handlers.keys).to include(:disarm_seen, :bolted, :ucs, :attack)
-    expect(tracker.names.keys).to eq(%w[eohunter:messages eohunter:ucs eohunter:attack])
+    expect(tracker.names.keys).to eq(%w[eohunter:messages eohunter:ucs eohunter:attack eohunter:reload])
+  end
+
+  # A player's supplement file (lich-5 #1608) can define a user_ event
+  # after the script started. Lich announces the reload; Watch enumerates
+  # the message events again under the same name, which replaces rather
+  # than stacks, so the new event reaches the bus exactly once.
+  it 'subscribes to an event added by a definitions reload, once, and drops it on uninstall' do
+    tracker.emit(:user_feed_result, ok: true, raw: 'x')
+    expect(seen).to be_empty
+
+    allow(Lich::Gemstone::Combat::Messages).to receive(:events).and_return(Lich::Gemstone::Combat::Messages.events + [:user_feed_result])
+    tracker.emit(:definitions_reloaded, files: ['messages.rb'], supplements: { messages: 1 })
+    tracker.emit(:user_feed_result, ok: true, raw: 'x')
+    tracker.emit(:bolted, raw: 'y')
+    expect(seen).to eq([[:user_feed_result, { ok: true, raw: 'x' }], [:bolted, { raw: 'y' }]])
+    expect(tracker.handlers[:user_feed_result].size).to eq(1)
+    expect(tracker.handlers[:bolted].size).to eq(1)
+
+    described_class.uninstall!
+    expect(tracker.handlers.values.flatten).to be_empty
+    expect(described_class.installed?).to be false
   end
 
   it 'passes a message event through under its name with the line' do

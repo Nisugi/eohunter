@@ -36,8 +36,15 @@ module Lich
           def enable! = @enabled = true
           def configure(opts) = settings.merge!(opts)
 
+          # Named registration replaces, as Observers.on does (lich-5
+          # observers.rb): the old block leaves every type list before the
+          # new one is added, so a re-register never stacks.
           def on(*types, name: nil, &block)
-            names[name] = block if name
+            if name
+              old = names.delete(name)
+              handlers.each_value { |list| list.delete(old) } if old
+              names[name] = block
+            end
             types.each { |t| (handlers[t] ||= []) << block }
             block
           end
