@@ -27,6 +27,54 @@ module EO::Engine
     #   @return [Time] when it was emitted
     Event = Struct.new(:type, :data, :at, keyword_init: true)
 
+    # A registered wait: `arm` returns one, `wait` blocks on it, `cancel`
+    # removes it. The registration lives from `arm` until `cancel`, so an
+    # event emitted in between is queued even while nobody is waiting yet.
+    class Waiter
+      # @return [Hash] the bus's own record: types, matcher and queue
+      attr_reader :entry
+
+      # @param bus [Module] Events
+      # @param types [Array<Symbol>]
+      # @param matcher [Proc, nil]
+      def initialize(bus, types, matcher)
+        @bus = bus
+        @entry = { types: types, matcher: matcher, queue: Queue.new }
+      end
+
+      # Block until a queued event or the timeout.
+      #
+      # @param timeout [Numeric] seconds
+      # @return [Event, nil] the first queued event, or nil on timeout
+      def wait(timeout:)
+        deadline = Time.now + timeout
+        loop do
+          remaining = deadline - Time.now
+          return nil if remaining <= 0
+
+          begin
+            return @entry[:queue].pop(true)
+          rescue ThreadError
+            sleep([remaining, 0.05].min)
+          end
+        end
+      end
+
+      # An event already queued, without waiting.
+      #
+      # @return [Event, nil]
+      def poll
+        @entry[:queue].pop(true)
+      rescue ThreadError
+        nil
+      end
+
+      # Remove the registration. Safe to call twice.
+      #
+      # @return [nil]
+      def cancel = @bus.disarm(self)
+    end
+
     @mutex = Mutex.new
     @subscribers = Hash.new { |h, k| h[k] = [] } # type => [callable, ...]
     @any_subscribers = []
@@ -96,7 +144,8 @@ module EO::Engine
 
       # Block until an event of one of +types+ arrives (optionally passing
       # +matcher+, a callable given the event). Returns the Event, or nil on
-      # timeout. This is what verified actions build on.
+      # timeout. `arm` then `wait` then `cancel`, for a caller with nothing
+      # to do between registering and waiting.
       #
       # @param types [Array<Symbol>] the event types to wait for
       # @param timeout [Numeric] seconds to wait
@@ -104,24 +153,35 @@ module EO::Engine
       # @yieldparam event [Event]
       # @return [Event, nil] the first matching event, or nil on timeout
       def await(*types, timeout:, &matcher)
-        queue = Queue.new
-        waiter = { types: types, matcher: matcher, queue: queue }
-        @mutex.synchronize { @waiters << waiter }
-        begin
-          deadline = Time.now + timeout
-          loop do
-            remaining = deadline - Time.now
-            return nil if remaining <= 0
+        waiter = arm(*types, &matcher)
+        waiter.wait(timeout: timeout)
+      ensure
+        waiter&.cancel
+      end
 
-            begin
-              return queue.pop(true)
-            rescue ThreadError
-              sleep([remaining, 0.05].min)
-            end
-          end
-        ensure
-          @mutex.synchronize { @waiters.delete(waiter) }
-        end
+      # Register a waiter for +types+ now and hand it back, so the caller
+      # can do something (send a command) before it waits. Events emitted
+      # from this call on are queued for it; anything earlier is not, which
+      # is what keeps a previous run's fact from confirming this one. The
+      # caller must `cancel` it, or `wait` inside a begin/ensure that does.
+      #
+      # @param types [Array<Symbol>] the event types to wait for
+      # @yield [event] an optional filter; only a true answer is queued
+      # @yieldparam event [Event]
+      # @return [Waiter]
+      def arm(*types, &matcher)
+        waiter = Waiter.new(self, types, matcher)
+        @mutex.synchronize { @waiters << waiter.entry }
+        waiter
+      end
+
+      # Drop a waiter's registration (Waiter#cancel calls this).
+      #
+      # @param waiter [Waiter]
+      # @return [nil]
+      def disarm(waiter)
+        @mutex.synchronize { @waiters.delete(waiter.entry) }
+        nil
       end
 
       # Errors raised by subscribers are handed to this callable (e.g. the

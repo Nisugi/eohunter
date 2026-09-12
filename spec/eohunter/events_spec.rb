@@ -80,4 +80,31 @@ RSpec.describe EO::Engine::Events do
       expect(described_class.instance_variable_get(:@waiters)).to be_empty
     end
   end
+
+  # arm registers now, wait blocks later: what an action needs to send a
+  # command between the two, so the answer cannot slip past the wait.
+  describe '.arm' do
+    it 'queues an event emitted between arm and wait, and not one emitted before' do
+      described_class.emit(:user_feed_result, ok: false)
+      waiter = described_class.arm(:user_feed_result)
+      described_class.emit(:user_feed_result, ok: true)
+      event = waiter.wait(timeout: 0.1)
+      expect(event.data).to eq(ok: true)
+      waiter.cancel
+    end
+
+    it 'applies the matcher, answers poll without waiting, and cancel removes it' do
+      waiter = described_class.arm(:user_feed_result) { |e| e.data[:what] == 'crystal' }
+      expect(waiter.poll).to be_nil
+      described_class.emit(:user_feed_result, what: 'orb')
+      described_class.emit(:user_feed_result, what: 'crystal')
+      expect(waiter.poll.data).to eq(what: 'crystal')
+      expect(waiter.poll).to be_nil
+      waiter.cancel
+      waiter.cancel
+      expect(described_class.instance_variable_get(:@waiters)).to be_empty
+      described_class.emit(:user_feed_result, what: 'crystal')
+      expect(waiter.poll).to be_nil
+    end
+  end
 end

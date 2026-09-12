@@ -64,7 +64,7 @@ module EO::Engine
     # The action contract. Subclasses give `preconditions` (a Symbol, :ok
     # to proceed) and `perform` (a Result); `call` runs the shared
     # gates between them. The three confirmation shapes are private
-    # helpers here: send_and_match and send_and_observe.
+    # helpers here: send_and_match, send_and_observe and send_and_await.
     class Base
       # Seconds a confirmation wait lasts when the action names no other.
       DEFAULT_TIMEOUT = 8
@@ -335,6 +335,40 @@ module EO::Engine
           sleep 0.05
         end
         Result.new(status: :timeout, reason: :state_unchanged)
+      end
+
+      # The event shape: arm a bus waiter, send, wait for a matching event.
+      # The waiter is armed BEFORE the send because the ladder blocks on
+      # the game's first answer line, and that line is often the one Lich
+      # turns into the event; armed after, the wait would start after the
+      # event had gone by. Nothing emitted before the arm can satisfy it,
+      # so a previous run's fact never confirms this one. Consumer: the
+      # preparation word, waiting on a player-defined user_ event (lich-5
+      # #1608); the shape is bigshot-free.
+      #
+      # @param command [String]
+      # @param types [Array<Symbol>] the bus events that confirm it
+      # @param timeout [Numeric] seconds after the send
+      # @yield [event] an optional filter; only a true answer confirms
+      # @return [Result] success with the event; the ladder's failure;
+      #   failed :interrupted or :dead; timeout :no_confirmation
+      def send_and_await(command, *types, timeout: DEFAULT_TIMEOUT, &matcher)
+        waiter = Events.arm(*types, &matcher)
+        first = send_through_ladder(command)
+        return first if first.is_a?(Result)
+
+        deadline = clock_now + timeout
+        loop do
+          event = waiter.poll
+          return Result.new(status: :success, event: event) if event
+          return Result.new(status: :failed, reason: :interrupted) if interrupted?
+          return Result.new(status: :failed, reason: :dead) if me.dead?
+          return Result.new(status: :timeout, reason: :no_confirmation) if clock_now > deadline
+
+          sleep 0.05
+        end
+      ensure
+        waiter&.cancel
       end
     end
   end

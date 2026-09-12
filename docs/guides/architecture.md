@@ -79,7 +79,10 @@ through three helpers:
   game's transient refusals (roundtime, stun, webbed) and reports the
   permanent ones as failures;
 - `send_and_match`: send once and wait for one of the given answers;
-- `send_and_observe`: send and wait for an event from the watch.
+- `send_and_observe`: send and poll World until it shows the change;
+- `send_and_await`: arm a bus waiter, send, and wait for the event the
+  watch turns the answer into. Armed before the send, because the
+  answer is often the first line back.
 
 Nothing sends a command and hopes. A refused command is a failed action
 with the refusal as its reason, and the caller decides what that means.

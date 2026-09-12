@@ -188,6 +188,69 @@ RSpec.describe EO::Engine::Actions::Base do
     end
   end
 
+  # The event shape. The scripted game emits the bus event from inside
+  # the send, the way Lich's message scanner turns the first answer line
+  # into a fact before fput has returned: the waiter has to be armed
+  # before the send to see it.
+  describe '#send_and_await' do
+    after { EO::Engine::Events.reset! }
+
+    def await_feed(action, timeout: 0.2, &matcher)
+      action.perform_block = ->(a) { a.send(:send_and_await, 'feed my crystal', :user_feed_result, timeout: timeout, &matcher) }
+      action.call
+    end
+
+    it 'confirms on an event emitted during the send, and leaves no waiter behind' do
+      action = build
+      allow(action).to receive(:game_send) do |cmd|
+        sent << cmd
+        EO::Engine::Events.emit(:user_feed_result, ok: true, raw: 'You feed the crystal and it hums softly.')
+        'You feed the crystal and it hums softly.'
+      end
+      result = await_feed(action)
+      expect(result).to be_success
+      expect(result.event.data).to include(ok: true)
+      expect(result).to be_acted
+      expect(EO::Engine::Events.instance_variable_get(:@waiters)).to be_empty
+    end
+
+    it 'ignores an event from before the send and one the matcher rejects' do
+      EO::Engine::Events.emit(:user_feed_result, ok: true)
+      replies['feed my crystal'] << ['You feed the crystal and it does nothing.']
+      action = build
+      allow(action).to receive(:game_send) do |cmd|
+        sent << cmd
+        EO::Engine::Events.emit(:user_feed_result, what: 'orb', ok: true)
+        'You feed the crystal and it does nothing.'
+      end
+      result = await_feed(action) { |e| e.data[:what] == 'crystal' }
+      expect(result.status).to eq(:timeout)
+      expect(result.reason).to eq(:no_confirmation)
+    end
+
+    it 'returns the ladder failure instead of waiting' do
+      action = build
+      allow(action).to receive(:game_send).and_return(:too_many_resends)
+      result = await_feed(action, timeout: 5)
+      expect(result.status).to eq(:failed)
+      expect(result.reason).to eq(:too_many_resends)
+      expect(EO::Engine::Events.instance_variable_get(:@waiters)).to be_empty
+    end
+
+    it 'stops on the interrupt and on our death while waiting' do
+      replies['feed my crystal'] << ['You feed the crystal.']
+      stopping = false
+      action = build(interrupt: -> { stopping })
+      allow(action).to receive(:sleep) { stopping = true }
+      expect(await_feed(action, timeout: 5).reason).to eq(:interrupted)
+
+      replies['feed my crystal'] << ['You feed the crystal.']
+      action = build
+      allow(action).to receive(:sleep) { me[:dead?] = true }
+      expect(await_feed(action, timeout: 5).reason).to eq(:dead)
+    end
+  end
+
   describe 'the engine interrupt' do
     after { described_class.interrupt = nil }
 
