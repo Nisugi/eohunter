@@ -150,6 +150,45 @@ RSpec.describe 'combat actions' do
       end
     end
 
+    # The 2026-09-13 hunt: a branded goliath diviner's Mystic Impedance
+    # (1708) shut 515 for 30 seconds. Unmatched, this line fell through to
+    # the success return, which reset the failure streak and hid the loop
+    # from the spin detector - `incant 515` went out 48 times in four
+    # seconds. Verbatim from the log.
+    let(:blocked_line) do
+      'The incantations of countless spells swirl through your mind as a golden ' \
+        "light flashes before your eyes.  You can't seem to recall how to prepare " \
+        'the Rapid Fire spell!'
+    end
+
+    it 'fails a prepare the game refused, rather than counting it a cast' do
+      allow(spell).to receive(:cast).and_return(blocked_line)
+      result = cast(target: kobold).call
+      expect(result).not_to be_success
+      expect(result.reason).to eq(:blocked_prepare)
+      expect(result.line).to eq(blocked_line)
+    end
+
+    it 'records the ceiling the refusal proves' do
+      allow(world).to receive(:blocked_prepare!)
+      allow(spell).to receive(:cast).and_return(blocked_line)
+      cast(target: kobold).call
+      expect(world).to have_received(:blocked_prepare!).with(1030)
+    end
+
+    it 'refuses a later spell at or above the ceiling without sending it' do
+      allow(world).to receive(:casting_allowed?).with(1030).and_return(false)
+      expect(spell).not_to receive(:cast)
+      expect(cast(target: kobold).call.reason).to eq(:blocked_prepare)
+    end
+
+    it 'tells the world when a spell did prepare, so the bound can lift' do
+      allow(world).to receive(:prepare_succeeded!)
+      allow(spell).to receive(:cast).and_return('Cast Roundtime 3 Seconds.')
+      expect(cast(target: kobold).call).to be_success
+      expect(world).to have_received(:prepare_succeeded!).with(1030)
+    end
+
     it 'retries a hindrance up to three times, then fails :hindrance' do
       allow(spell).to receive(:cast).and_return('[Spell Hindrance for Full Plate is 30 percent.]')
       result = cast(target: kobold).call

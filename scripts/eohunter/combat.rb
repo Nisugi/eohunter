@@ -152,19 +152,31 @@ module EO::Engine
       MAX_HINDRANCE_RETRIES = 3 # bigshot cast_spell max_attempts
 
       # The sanctuary refusal: no spells of war here.
-      BLOCKED   = /^Be at peace my child, there is no need for spells of war in here\.$|Spells of War cannot be cast/
+      BLOCKED = /^Be at peace my child, there is no need for spells of war in here\.$|Spells of War cannot be cast/
       # The cast went nowhere: no target, or the target left mid-cast.
       NO_TARGET = /^Cast at what\?$|^You do not currently have a target\.$|leaving you casting at nothing but thin air!$/
       # The hindrance line that earns a retry.
-      HINDERED  = /^\[Spell Hindrance for/
+      HINDERED = /^\[Spell Hindrance for/
       # The spell fizzled.
-      FIZZLED   = /^Your magic fizzles ineffectually\.$/
+      FIZZLED = /^Your magic fizzles ineffectually\.$/
       # Every answer that means the prepare itself was refused.
       CANNOT_PREPARE = /^You can't think clearly enough to prepare a spell!$|^You are too injured to make that dextrous of a movement|^You can't make that dextrous of a move!$|^The searing pain in your throat makes that impossible|^All you manage to do is cough up some blood\.$|^You do not know that spell!$|^That is not something you can prepare\./
       # No mana at all.
-      NO_MANA   = /^But you don't have any mana!$/
+      NO_MANA = /^But you don't have any mana!$/
+      # An outside effect is holding the prepare shut. Mystic Impedance
+      # (1708) is the one seen: the caster's ranks set a spell level, and
+      # every spell at or above it refuses to prepare for the duration -
+      # 30 seconds when a creature casts it. The message names the spell
+      # it refused, which is what tells us where the ceiling is.
+      #
+      # This has to be a failure. Unmatched, it fell through to the
+      # success return below, so a refused cast reset the failure streak
+      # and the engine's spin detector never saw it: one 1708 from a
+      # branded goliath diviner on 2026-09-13 sent `incant 515` 48 times
+      # in four seconds.
+      BLOCKED_PREPARE = /^The incantations of countless spells swirl through your mind as a golden light flashes before your eyes\.\s+You can't seem to recall how to prepare the (.+) spell!$/
       # The cast roundtime line that confirms a cast went out.
-      CAST      = /^(?:Cast|Sing) Roundtime [0-9]+ Seconds?\.$|^Roundtime: \d+ sec\.$/
+      CAST = /^(?:Cast|Sing) Roundtime [0-9]+ Seconds?\.$|^Roundtime: \d+ sec\.$/
 
       # @param world [World]
       # @param spell [Integer, #to_i] the spell number
@@ -200,6 +212,11 @@ module EO::Engine
         s = spell
         return :unknown_spell if s.nil? || !s.known?
         return :unaffordable unless s.affordable?
+        # A prepare block already refused a spell at or below this one, so
+        # sending it would buy the same refusal a second time.
+        if @world.respond_to?(:casting_allowed?) && !@world.casting_allowed?(@spell_number)
+          return :blocked_prepare
+        end
 
         :ok
       end
@@ -220,6 +237,7 @@ module EO::Engine
           return Result.new(status: :failed, reason: :blocked, line: line) if line =~ BLOCKED
           return Result.new(status: :failed, reason: :no_target, line: line) if line =~ NO_TARGET
           return Result.new(status: :failed, reason: :cannot_prepare, line: line) if line =~ CANNOT_PREPARE
+          return blocked_prepare(line) if line =~ BLOCKED_PREPARE
           return Result.new(status: :failed, reason: :no_mana, line: line) if line =~ NO_MANA
           return Result.new(status: :failed, reason: :fizzled, line: line) if line =~ FIZZLED
 
@@ -231,6 +249,8 @@ module EO::Engine
             next
           end
 
+          # This one prepared, so any ceiling learned earlier sits above it.
+          @world.prepare_succeeded!(@spell_number) if @world.respond_to?(:prepare_succeeded!)
           return Result.new(status: :success, line: line)
         end
       end
@@ -241,6 +261,23 @@ module EO::Engine
         ::Spell[@spell_number]
       rescue StandardError
         nil
+      end
+
+      # The prepare was held shut from outside. Record the ceiling this
+      # refusal proves, so the rest of the fight can skip the spells it
+      # covers instead of learning each one the same expensive way.
+      #
+      # What is known is a bound, not a measurement: the spell that was
+      # refused is at or above the ceiling, and nothing here says how far
+      # below it the real cutoff sits. Engage treats it as "this number
+      # and up are shut" and lets a lower spell that does go out correct
+      # it.
+      #
+      # @param line [String] the refusal
+      # @return [Actions::Result] :blocked_prepare
+      def blocked_prepare(line)
+        @world.blocked_prepare!(@spell_number) if @world.respond_to?(:blocked_prepare!)
+        Result.new(status: :failed, reason: :blocked_prepare, line: line)
       end
 
       # bigshot cast_spell: target given -> cast / force_cast /

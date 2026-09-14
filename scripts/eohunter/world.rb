@@ -402,6 +402,59 @@ module EO::Engine
       nil
     end
 
+    # An outside effect refused to let us prepare this spell, so every
+    # spell at or above it is shut until the effect ends.
+    #
+    # Mystic Impedance (1708) is the case this was written for: a branded
+    # goliath diviner's flicks-a-finger cast, 30 seconds, with a level
+    # ceiling set by the caster's ranks. The refusal is the only thing
+    # that reveals where the ceiling is, so one blocked spell is spent
+    # learning it and the rest are skipped without being sent.
+    #
+    # The number recorded is an upper bound: 515 refused proves the
+    # ceiling is 515 or lower, not that 514 would go out. A lower spell
+    # that does cast lowers it (see #casting_allowed?).
+    #
+    # @param num [Integer] the spell the game refused to prepare
+    # @return [void]
+    def blocked_prepare!(num)
+      num = num.to_i
+      return if num <= 0
+
+      @prepare_ceiling = num if @prepare_ceiling.nil? || num < @prepare_ceiling
+    end
+
+    # Whether a spell is worth sending while a prepare block is up.
+    #
+    # The ceiling is dropped as soon as no debuff is running, rather than
+    # on a timer: the effect's own dialog entry is the clock, and a
+    # hardcoded duration would outlive a dispel or undercut a refresh.
+    #
+    # @param num [Integer] the spell about to be cast
+    # @return [Boolean] false when this spell is at or above the ceiling
+    def casting_allowed?(num)
+      return true if @prepare_ceiling.nil?
+
+      # Nothing left on us: whatever set the ceiling has ended.
+      if debuff_names.empty?
+        @prepare_ceiling = nil
+        return true
+      end
+
+      num.to_i < @prepare_ceiling
+    end
+
+    # A spell that prepared while a ceiling is set proves the ceiling sits
+    # above it, which is how the bound tightens without spending refusals.
+    #
+    # @param num [Integer] a spell that went out
+    # @return [void]
+    def prepare_succeeded!(num)
+      return if @prepare_ceiling.nil?
+
+      @prepare_ceiling = nil if num.to_i >= @prepare_ceiling
+    end
+
     # Source accessor (the spec seam): Lich's status words.
     # @return [Module] Lich::Gemstone::Status
     def status    = ::Lich::Gemstone::Status
