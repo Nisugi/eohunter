@@ -214,6 +214,7 @@ line reference.
 - [The routine language](docs/guides/routines.md): the words, the spell syntax, the maneuvers, every modifier
 - [Architecture](docs/guides/architecture.md): the pieces, the tick, actions, World, events, travel, groups, the watchdogs
 - [Extending the engine](docs/guides/extending.md): adding an action, a routine word, a behavior, a World reader
+- [Mining creature abilities](docs/guides/creature-abilities.md): identifying what a creature did to you from a session log, and writing it into the bestiary
 - [Troubleshooting](docs/guides/troubleshooting.md): the lines, the stops, common causes, what to report
 - [Contributing](docs/guides/contributing.md): the flow, the conventions, review
 - [Core dependencies](docs/guides/core-dependencies.md): the lich-5 PRs, what each provides, the test package
