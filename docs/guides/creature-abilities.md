@@ -136,12 +136,24 @@ abilities: [
     dispellable: nil,
     notes: "Golden runes onset, shows in the Debuffs dialog as " \
            "\"Mystic Impedance\" (id 1708). Blocks the PREPARE of spells " \
-           "at or above the threshold; lower spells still cast. The " \
-           "threshold is an UPPER BOUND: 515 was observed blocked, so the " \
-           "cutoff is <= 15, but 14 is not confirmed safe."
+           "at or above the threshold; lower spells still prepare and " \
+           "cast normally. The threshold is an UPPER BOUND: 515 (level " \
+           "15) was observed blocked, so the cutoff is <= 15, but 14 is " \
+           "not confirmed safe. Duration 30s observed, matching the " \
+           "wiki's creature-cast duration (180s when player-cast). " \
+           "dispellable is nil, not false: the 1708 wiki page does not " \
+           "mention dispelling and no dispel-side page lists it, so it " \
+           "is unknown rather than known-negative."
   }
 ],
 ```
+
+That `notes` is long on purpose, and it is the whole example. Every
+sentence in it is either something observed and where, or a bound and why
+it is only a bound. A reader who finds this creature later can tell
+exactly which parts were measured and which are still open - which is not
+recoverable from the numbers alone. This entry is live in
+`branded_goliath_diviner.rb`; copy its shape, not just its fields.
 
 **`messaging.triggers`** - the lines that start and end it, verbatim from
 the log, so the runtime can key on them:
