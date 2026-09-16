@@ -346,22 +346,32 @@ of `delete` would auto-confirm a deletion with nobody watching.
 Also note modal buttons take `variant: default|primary|danger`
 (`contract.rb:110-114`) — not `tone:`, which is what every other node uses.
 
-## Suggested order
+## Where the port stands
 
-1. **Lifecycle spine** — availability detection, `ThreadGroup::Default` start,
-   page registration, `terminate_owner` teardown, URL fallback. Nothing renders
-   yet; this is where the operational trap lives.
-2. **Generic settings renderer** — drive `Schema#fields` over 10 tabs. Delivers
-   most of the 16 pages at once. Errors/help/provenance as sibling `text` nodes.
-3. **Landing page and document management** — manage/compare, revision checks,
-   delete confirmation via `dialog`.
-4. **Map editor** — `register_files`, composite + regions, left/right click.
-   Ships colourless until the contract change lands; still fully usable.
-5. **Bespoke editors** — routine, injury, ordered lists, structured fields.
-6. **Delete the old transport** — server, assets, `MapImages`, `ASSETS`
-   bundling, and the specs that test them.
+Done, on `feat/webui-setup-port`:
 
-Steps 1–5 need nothing from lich-5. Only the region colour does.
+1. **Lifecycle spine** -- service started from `ThreadGroup::Default`,
+   page registration, `terminate_owner` teardown, printed-URL fallback.
+2. **Generic settings renderer** -- all 119 schema fields over 12 tabs, with
+   help, provenance and per-field errors as sibling `text` nodes. Measured at
+   15.9 ms / 116 KB / 513 components.
+3. **Landing page** -- lists saved hunts and loads one. Revision checks are
+   wired through `Store`, so a conflicting save is reported, not silently won.
+4. **The build** -- `rake build` writes `dist/eohunter-setup.lic`, asset
+   bundling gone.
+
+Still to do:
+
+5. **Document management** -- rename, hide/show, set-active, and delete with a
+   `dialog` confirmation (see the non-blocking `.then` note above).
+6. **Map editor** -- `register_files`, composite + regions, left/right click.
+   Proven to work; not yet wired into the page. Ships colourless until the
+   region-tone change lands.
+7. **Bespoke editors** -- routine, injury policy, ordered lists, and the
+   `structured` fields, which currently fall back to a YAML textarea.
+8. **The guided five-step wizard**, which the tabbed editor does not replace.
+
+None of 5-8 needs anything from lich-5. Only the region colour does.
 
 ## What to send upstream to lich-5
 
