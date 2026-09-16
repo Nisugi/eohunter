@@ -18,12 +18,15 @@ module EO
       # Schema::PAGES rather than being repeated here: a settings page that
       # exists in the schema but not in this table would still get a tab, under
       # a generated title, instead of silently rendering nowhere.
+      # Short on purpose: these label one horizontal strip of tabs, not a
+      # sidebar -- the client ignores `vertical` -- so a long title pushes the
+      # rest of the tabs off the window.
       TITLES = {
-        'area' => 'Area & creatures', 'hunting' => 'Hunting behavior',
-        'rest' => 'Rest & services', 'recovery' => 'Recovery & emergencies',
-        'monitoring' => 'Monitoring & limits', 'combat' => 'Combat Plans',
+        'area' => 'Area', 'hunting' => 'Hunting',
+        'rest' => 'Rest', 'recovery' => 'Recovery',
+        'monitoring' => 'Monitoring', 'combat' => 'Combat',
         'equipment' => 'Equipment', 'buffs' => 'Buffs',
-        'preparations' => 'Item preparations', 'team' => 'Multi-Account Team'
+        'preparations' => 'Items', 'team' => 'Team'
       }.freeze
 
       # Settings pages, in the schema's own order.
@@ -32,7 +35,7 @@ module EO
       # Every tab: the landing page, each settings page, then review.
       PAGES = ([%w[manage Profiles]] +
                SETTINGS_PAGES.map { |page| [page, TITLES[page] || page.split('_').map(&:capitalize).join(' ')] } +
-               [['review', 'Review & save']]).freeze
+               [%w[review Review]]).freeze
 
       attr_reader :app, :boot, :draft, :name, :kind, :revision, :validation, :status, :status_error,
                   :pending_delete

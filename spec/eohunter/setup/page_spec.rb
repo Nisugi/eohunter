@@ -169,6 +169,28 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
     end
   end
 
+  # A `bare` page does not scroll on its own: the stylesheet puts
+  # `overflow: hidden` on the body and gives the height to a `.webui-scroll`
+  # that is a DIRECT child of the page root (assets/app.css:66-69). The editor
+  # is taller than any window, so without that node everything below the draft
+  # bar is unreachable -- the page opens and nothing on it can be used.
+  it 'puts the content in a scroll node directly under the page root' do
+    _page, tree = render
+    scrolls = tree.tree.children.select { |node| node.type == :scroll }
+    expect(scrolls.size).to eq(1)
+    expect(tree.tree.children.map(&:type)).to include(:scroll)
+    # and the tabs live inside it, not beside it
+    expect(scrolls.first.children.map(&:type)).to include(:tabs)
+  end
+
+  it 'keeps tab titles short enough for one horizontal strip' do
+    # The client ignores `vertical` (no props.vertical in app.js), so these
+    # are laid out in a row and a long title pushes the rest off the window.
+    EO::HunterSetup::Editor::PAGES.each do |_identity, title|
+      expect(title.length).to be <= 12, "#{title.inspect} is too long for a tab"
+    end
+  end
+
   # Document names are free-form player text. A component key must match
   # Contract::IDENTIFIER, which allows no spaces, and an invalid key fails the
   # WHOLE page render -- not just that row -- during attach. A real install had

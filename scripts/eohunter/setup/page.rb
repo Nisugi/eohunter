@@ -30,7 +30,15 @@ module EO
       def render(builder, editor, on:)
         Page.header(builder, editor, on: on)
         Page.status(builder, editor)
-        Page.body(builder, editor, on: on)
+        # The editor is taller than any window, and a `bare` page does not
+        # scroll on its own: the stylesheet sets `overflow: hidden` on the body
+        # and gives the height to a `.webui-scroll` child
+        # (assets/app.css:66-69). Without this node the draft bar is all you
+        # can reach -- the tabs and every control below sit off-screen with no
+        # way to get to them.
+        builder.scroll(key: 'content') do
+          Page.body(builder, editor, on: on)
+        end
       end
 
       # Name, dirty state, and the actions that apply to the whole draft.
@@ -65,7 +73,12 @@ module EO
       # Navigation and the page under it.
       def body(builder, editor, on:)
         names = Editor::PAGES.map(&:last)
-        builder.tabs(key: 'nav', names: names, vertical: true, on: { select: on[:select_page] }) do
+        # Not `vertical: true`. The contract accepts the property but the
+        # client never reads it (no `props.vertical` anywhere in app.js), so a
+        # sidebar is not actually available -- the tabs render as one
+        # horizontal strip either way, and asking for a sidebar we do not get
+        # only hides that the titles have to be short enough to fit.
+        builder.tabs(key: 'nav', names: names, on: { select: on[:select_page] }) do
           builder.collection(Editor::PAGES) do |(identity, title), _index|
             builder.stack(key: identity, slot: title) do
               case identity
