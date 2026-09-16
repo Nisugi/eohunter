@@ -14,7 +14,16 @@ EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
 app = EO::HunterSetup::Runtime.app(
   data_dir: DATA_DIR, game: XMLData.game, character: Char.name,
   char_settings: CharSettings.to_hash,
-  templates: defined?(CreatureTemplate) ? CreatureTemplate.all : [],
+  # Lich namespaces this as Lich::Gemstone::CreatureTemplate and does not
+  # expose a bare constant, so testing the short name alone would silently
+  # hand the editor an empty creature list.
+  templates: if defined?(Lich::Gemstone::CreatureTemplate)
+               Lich::Gemstone::CreatureTemplate.all
+             elsif defined?(CreatureTemplate)
+               CreatureTemplate.all
+             else
+               []
+             end,
   rooms: Map.list, uid_resolver: ->(uid) { Map.ids_from_uid(uid) }
 )
 editor = EO::HunterSetup::Editor.new(app: app)
