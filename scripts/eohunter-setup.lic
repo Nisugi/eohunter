@@ -1,0 +1,67 @@
+=begin
+  eohunter-setup: hunt profile editor, rendered through Lich's WebUI.
+  Start with ;eohunter setup or ;eohunter-setup. Stop with ;kill eohunter-setup.
+  Saves EOHunter configuration only; it never starts a hunt.
+=end
+
+me = Script.current
+exit if Script.list.any? { |other| other.name == me.name && !other.equal?(me) }
+
+require File.join(LIB_DIR, 'api', 'webui.rb')
+load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'runtime.rb') unless defined?(::EO::HunterSetup::Runtime)
+EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
+
+app = EO::HunterSetup::Runtime.app(
+  data_dir: DATA_DIR, game: XMLData.game, character: Char.name,
+  char_settings: CharSettings.to_hash,
+  templates: defined?(CreatureTemplate) ? CreatureTemplate.all : [],
+  rooms: Map.list, uid_resolver: ->(uid) { Map.ids_from_uid(uid) }
+)
+editor = EO::HunterSetup::Editor.new(app: app)
+
+# The page is torn down with this script, but the WebUI service is shared with
+# every other script using it, so terminate_owner -- never service.stop.
+before_dying { Lich::API.webui_terminate_owner(me) }
+
+closed = Queue.new
+page = nil
+
+# Re-render after a handler changes the draft. Handlers run on the dispatcher
+# thread, so this must stay cheap: mutate, refresh, return.
+refresh = lambda do |changed|
+  Lich::API.webui_refresh(page) if changed && page
+  changed
+end
+
+handlers = {
+  rename: ->(event) { refresh.call(editor.on_rename(event[:value])) },
+  validate: ->(_event) { refresh.call(editor.on_validate) },
+  save: ->(_event) { refresh.call(editor.on_save) },
+  revert: ->(_event) { refresh.call(editor.on_revert) },
+  select_page: ->(_event) { false },
+  load: ->(name, _event) { refresh.call(editor.on_load(name)) },
+  change: ->(key, event) { refresh.call(editor.on_change(key, event[:value])) }
+}
+
+page = Lich::API.webui_page(
+  owner: me, id: 'eohunter-setup', title: 'EOHunter - Hunt setup',
+  props: { bare: true },
+  on: { close: ->(event) { closed.push(event[:reason]) } }
+) { |builder| EO::HunterSetup::Page.render(builder, editor, on: handlers) }
+
+# The WebUI listener is one accept-loop thread, and a thread created from a
+# script belongs to that script's ThreadGroup -- which Lich kills when the
+# script stops. Starting the shared service from here would hand it a thread
+# that dies on ;kill, taking the WebUI down for every other script. Start it
+# from the default group so it outlives us.
+starter = Thread.new { Lich::API.webui_start }
+ThreadGroup::Default.add(starter)
+starter.join
+
+url = Lich::API.webui_launch_url(page: page)
+Lich::Messaging.msg('info', "eohunter setup: #{url}")
+# An app-mode window needs Chrome or Edge; without one the printed URL above
+# still opens anywhere. Launch failure is not an error.
+Lich::API.webui_open(page: page)
+
+closed.pop
