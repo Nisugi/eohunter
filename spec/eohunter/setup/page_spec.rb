@@ -169,6 +169,51 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
     end
   end
 
+  # Document names are free-form player text. A component key must match
+  # Contract::IDENTIFIER, which allows no spaces, and an invalid key fails the
+  # WHOLE page render -- not just that row -- during attach. A real install had
+  # a Bigshot profile called "Boreal Forest" and the editor would not open.
+  describe 'document names that are not identifiers' do
+    it 'derives a legal key from any name' do
+      ['Boreal Forest', 'a/b', 'x' * 200, 'sp ace.and:colon', '%&*()'].each do |name|
+        key = described_class.row_key('row', name)
+        expect(key).to match(Lich::WebUI::Contract::IDENTIFIER),
+                       "#{name.inspect} produced #{key.inspect}"
+      end
+    end
+
+    it 'keeps names apart that differ only in the unsafe characters' do
+      expect(described_class.row_key('row', 'a b')).not_to eq(described_class.row_key('row', 'a_b'))
+    end
+
+    it 'renders a hunt whose name contains a space' do
+      session = EO::HunterSetup::Editor.new(app: app)
+      session.on_rename('Boreal Forest')
+      session.on_save
+      expect(session.status_error).to be(false)
+      expect { render(session) }.not_to raise_error
+      _page, tree = render(session)
+      expect(tree.tree.each.any? { |node| node.props[:content] == 'Boreal Forest' }).to be(true)
+    end
+  end
+
+  # The runtime validates on attach, not only on render, so anything the
+  # validator refuses stops the editor opening at all. This walks the tree the
+  # way the runtime does.
+  it 'produces a tree whose every key and cid the contract accepts' do
+    session = EO::HunterSetup::Editor.new(app: app)
+    session.on_rename('Boreal Forest')
+    session.on_save
+    _page, tree = render(session)
+    tree.tree.each do |node|
+      expect(node.cid).to match(Lich::WebUI::Contract::CID_PATTERN), "bad cid #{node.cid}"
+      key = node.props[:key]
+      next if key.nil?
+
+      expect(key.to_s).to match(Lich::WebUI::Contract::IDENTIFIER), "bad key #{key.inspect}"
+    end
+  end
+
   # The handler contract, pinned because getting it wrong fails silently.
   #
   # A bound callback is invoked with a Lich::WebUI::Runtime::EventContext --

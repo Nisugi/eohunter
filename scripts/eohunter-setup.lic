@@ -106,8 +106,11 @@ begin
       Lich::WebUI.service.register_files('eohunter-maps', MAP_DIR, owner: me, script_root: MAP_DIR)
   end
 rescue StandardError => error
-  # A map that cannot be served is not a reason to refuse the editor: every
-  # other page still works, and the map says so itself.
+  # A map that cannot be served is not a reason to refuse the editor. Leaving
+  # the route nil is what keeps that true: Page draws the rooms without the
+  # artwork, rather than naming a file the runtime would refuse -- and it
+  # refuses during attach, which would stop the whole page rendering.
+  EO::HunterSetup::Page.map_route = nil
   Lich::Messaging.msg('warn', "eohunter setup: installed maps unavailable (#{error.message})")
 end
 

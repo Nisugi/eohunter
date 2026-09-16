@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 module EO
   module HunterSetup
     # Renders the editor as a Lich WebUI component tree.
@@ -119,7 +121,7 @@ module EO
       def native_row(builder, editor, name, on:)
         active = editor.active_profile == name
         hidden = editor.hidden?(name)
-        builder.columns(key: "row-#{name}", count: 5, weights: [4, 2, 2, 2, 2]) do
+        builder.columns(key: Page.row_key('row', name), count: 5, weights: [4, 2, 2, 2, 2]) do
           label = name.dup
           label << ' - default' if active
           label << ' - hidden' if hidden
@@ -152,7 +154,7 @@ module EO
           builder.text(key: 'note', emphasis: 'subtle',
                        content: 'Opening one copies it into a new EOHunter hunt. The original is never changed.')
           builder.collection(legacy) do |name, _index|
-            builder.columns(key: "row-#{name}", count: 2, weights: [4, 2]) do
+            builder.columns(key: Page.row_key('legacy', name), count: 2, weights: [4, 2]) do
               builder.text(key: 'name', slot: '0', content: name)
               builder.button(key: 'copy', slot: '1', label: 'Open a copy',
                              on: { activate: on[:copy_legacy].curry[name] })
@@ -260,7 +262,18 @@ module EO
           return
         end
 
-        layers = [{ 'kind' => 'image', 'x' => 0, 'y' => 0, 'src' => "#{Page.map_route}#{sheet}" }]
+        # No route means the sheets are not being served, so the image layer
+        # is left out entirely rather than pointing at a path the runtime will
+        # refuse. The regions still draw and still click; only the artwork is
+        # missing.
+        route = Page.map_route
+        unless route
+          builder.text(key: 'no-art', tone: 'caution',
+                       content: 'The installed map artwork is not being served, so the sheet is ' \
+                                'not shown. Room selection below still works.')
+        end
+        layers = []
+        layers << { 'kind' => 'image', 'x' => 0, 'y' => 0, 'src' => "#{route}#{sheet}" } if route
         rooms.each do |room|
           x1, y1, x2, y2 = room[:image_coords]
           role = editor.role_for(room[:id])
@@ -300,11 +313,17 @@ module EO
         end
       end
 
-      # Where the map sheets are served from; set once the script registers
-      # Lich's own MAP_DIR with the file service.
-      def map_route = @map_route || '/files/eohunter-maps/'
+      # Where the map sheets are served from, or nil when nothing registered
+      # them.
+      #
+      # Deliberately not defaulted to a plausible-looking path. The runtime
+      # refuses any image src that does not resolve to a registered file, and
+      # it refuses it during *attach* -- so one unserved sheet does not degrade
+      # the map, it stops the whole page from rendering. A guessed route is
+      # therefore worse than none.
+      def map_route = @map_route
 
-      # @param route [String] the /files/ prefix register_files returned
+      # @param route [String, nil] the /files/ prefix register_files returned
       def map_route=(route)
         @map_route = route
       end
@@ -422,6 +441,20 @@ module EO
         units = field['units'].to_s
         base = 'Order is kept.'
         units.empty? ? base : "#{base} #{units}"
+      end
+
+      # A component key derived from a document name.
+      #
+      # Profile names are free-form player text -- "Boreal Forest" is a real
+      # one -- and a component key must match Contract::IDENTIFIER, which
+      # allows no spaces. Interpolating the name directly fails the whole page
+      # render, not just that row. Unsafe characters become '_', and a short
+      # digest keeps two names that differ only in those characters apart.
+      def row_key(prefix, name)
+        text = name.to_s
+        safe = text.gsub(/[^A-Za-z0-9_.:-]/, '_')
+        digest = Digest::SHA256.hexdigest(text)[0, 8]
+        "#{prefix}-#{safe}-#{digest}"[0, 128]
       end
 
       # Options always carry an explicit "unset" entry: clearing a setting is
