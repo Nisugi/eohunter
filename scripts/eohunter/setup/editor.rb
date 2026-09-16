@@ -464,6 +464,108 @@ module EO
                                     map_image: @area[:map_image])
       end
 
+      # @return [Array<String>] reusable Combat Plans this character has
+      def plans = Array(@boot[:plans] || @boot['plans'])
+
+      # @return [Array<Hash>] maneuver words the installed engine knows,
+      #   so the editor can offer them without inventing a vocabulary
+      def routine_maneuvers = Array(@boot[:routine_maneuvers] || @boot['routine_maneuvers'])
+
+      # Point this hunt at a reusable Combat Plan, or clear the link.
+      # @param name [String, nil] plan name
+      # @return [Boolean] whether to re-render
+      def on_set_combat_plan(name)
+        if name.to_s.empty?
+          @draft.delete('combat_plan')
+        else
+          @draft['combat_plan'] = name.to_s
+        end
+        @validation = nil
+        @map = nil
+        note(name.to_s.empty? ? 'This hunt uses its own routines.' : "This hunt uses the #{name} plan.")
+      end
+
+      # Creature names the draft targets, in the order they are written.
+      # @return [Array<String>]
+      def target_names
+        list_entries('targets').map { |entry| entry.sub(/\([a-j]\)\z/i, '').strip }.reject(&:empty?)
+      end
+
+      # Which routine slot a creature uses, if it has its own.
+      # @param creature [String] creature name
+      # @return [String, nil] a-j
+      def routine_slot(creature)
+        entry = list_entries('targets').find { |text| text.sub(/\([a-j]\)\z/i, '').strip.casecmp?(creature.to_s) }
+        entry.to_s[/\(([b-j])\)\z/i, 1]
+      end
+
+      # The command text for a routine slot. 'a' is the hunt's main routine.
+      # @param slot [String, nil] a-j
+      # @return [String]
+      def routine_text(slot)
+        key = slot.nil? || slot.to_s.casecmp?('a') ? 'hunting_commands' : "hunting_commands_#{slot.to_s.downcase}"
+        settings[key].to_s
+      end
+
+      # Give one creature its own action sequence. The native composer picks
+      # the slot and rewrites the target list; existing routines are kept.
+      # @param creature [String] creature name
+      # @param commands [String] the routine text
+      # @return [Boolean] whether to re-render
+      def on_creature_sequence(creature, commands)
+        return note('Give this creature some actions first.', error: true) if commands.to_s.strip.empty?
+
+        result = @app.call('action' => 'creature_sequence', 'data' => @draft,
+                           'creature' => creature, 'commands' => commands)
+        @draft = result.is_a?(Hash) && result['settings'] ? result : @draft.merge(result || {})
+        @validation = nil
+        @map = nil
+        note("#{creature} now has its own sequence.")
+      rescue StandardError => error
+        note(error.message, error: true)
+      end
+
+      # @return [String] the current search text
+      def query = @query.to_s
+
+      # Find settings by label, key, help text or a familiar legacy name.
+      #
+      # Matching happens on Enter or when the box loses focus, not per
+      # keystroke: the WebUI client emits `change`, never `input`, so there is
+      # no live-filtering event to bind.
+      # @param text [String] search terms
+      # @return [Boolean] whether to re-render
+      def on_search(text)
+        @query = text.to_s.strip
+        true
+      end
+
+      # @return [Array<Hash>] fields matching every term in the query
+      def search_results
+        return [] if query.empty?
+
+        terms = query.downcase.split
+        fields.select do |field|
+          haystack = [field['key'], field['label'], field['help'], *Array(field['aliases'])].join(' ').downcase
+          terms.all? { |term| haystack.include?(term) }
+        end
+      end
+
+      # What this draft changes against what was last loaded, as a list of
+      # before/after pairs. Answers "what am I about to save?" without
+      # reading two YAML dumps side by side.
+      # @return [Array<Hash>] key, before and after
+      def changes
+        keys = (@baseline['settings'].to_h.keys + settings.keys).uniq.sort
+        keys.filter_map do |key|
+          before = @baseline['settings'].to_h[key]
+          after = settings[key]
+          next if before == after
+
+          { 'key' => key, 'before' => before, 'after' => after }
+        end
+      end
+
       # Entries of a comma-list setting, in order.
       # @param key [String] native setting key
       # @return [Array<String>]

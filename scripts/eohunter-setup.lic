@@ -94,6 +94,11 @@ handlers = {
   choose_zone: ->(event) { refresh.call(editor.on_choose_zone(event.payload[:value])) },
   choose_creature: ->(name, _event) { refresh.call(editor.on_choose_creature(name)) },
   apply_area: ->(_event) { refresh.call(editor.on_apply_area) },
+  combat_plan: ->(event) { quiet.call(editor.on_set_combat_plan(event.payload[:value])) },
+  search: ->(event) { quiet.call(editor.on_search(event.payload[:value])) },
+  creature_sequence: lambda { |creature, event|
+    refresh.call(editor.on_creature_sequence(creature, event.payload[:value]))
+  },
   hunt_injury_policy: ->(event) { quiet.call(editor.on_set_hunt_injury_policy(event.payload[:value])) },
   character_injury_policy: ->(event) { refresh.call(editor.on_set_character_injury_policy(event.payload[:value])) },
   room_geometry: ->(rooms, start, _event) { refresh.call(editor.on_room_geometry(rooms, start)) },

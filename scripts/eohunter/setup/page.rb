@@ -28,9 +28,12 @@ module EO
         apply_area: 0,
         assign_role: 0,
         change: 1,
+        character_injury_policy: 0,
         choose_creature: 1,
         choose_zone: 0,
+        combat_plan: 0,
         copy_legacy: 1,
+        creature_sequence: 1,
         delete_response: 0,
         hunt_injury_policy: 0,
         list_add: 1,
@@ -44,7 +47,9 @@ module EO
         request_delete: 1,
         resolve_area: 0,
         revert: 0,
+        room_geometry: 2,
         save: 0,
+        search: 0,
         select_page: 0,
         set_active: 1,
         set_hidden: 2,
@@ -71,6 +76,7 @@ module EO
       def render(builder, editor, on:)
         Page.header(builder, editor, on: on)
         Page.status(builder, editor)
+        Page.search(builder, editor, on: on)
         # The editor is taller than any window, and a `bare` page does not
         # scroll on its own: the stylesheet sets `overflow: hidden` on the body
         # and gives the height to a `.webui-scroll` child
@@ -132,7 +138,9 @@ module EO
               when 'manage' then Page.manage(builder, editor, on: on)
               when 'review' then Page.review(builder, editor)
               else
+                Page.character_injury(builder, editor, on: on) if identity == 'monitoring'
                 Page.area_map(builder, editor, on: on) if identity == 'area'
+                Page.combat(builder, editor, on: on) if identity == 'combat'
                 Page.settings(builder, editor, identity, on: on)
               end
             end
@@ -218,6 +226,144 @@ module EO
           builder.text(key: 'note', emphasis: 'subtle',
                        content: 'Saving stores a plan. It never starts a hunt, and it never ' \
                                 'changes a hunt already running.')
+        end
+      end
+
+      # The character-wide injury default, which every hunt without an
+      # override inherits. Set here rather than in the wizard, because it
+      # outlives any one hunt.
+      def character_injury(builder, editor, on:)
+        policies = editor.injury_policies.map(&:to_s)
+        return if policies.empty?
+
+        builder.group(key: 'char-injury', label: "This character's injury default") do
+          options = [{ 'value' => '', 'label' => '(none selected)' }] +
+                    policies.map { |name| { 'value' => name, 'label' => name } }
+          builder.select(key: 'choice', label: 'Default injury policy', options: options,
+                         value: editor.character_injury_policy.to_s,
+                         on: { change: on[:character_injury_policy] })
+          builder.text(key: 'note', emphasis: 'subtle',
+                       content: 'Hunts without their own override use this. A hunt already ' \
+                                'running keeps the settings it captured.')
+        end
+      end
+
+      # Recompute boundaries for the rooms the draft already names, using the
+      # same walker the hunt uses. Offered on the map, where the rooms are.
+      def footprint_controls(builder, editor, on:)
+        rooms = Array(editor.map && editor.map[:hunting_room_ids])
+        start = editor.settings['hunting_room_id']
+        return if rooms.empty? || start.to_s.empty?
+
+        builder.button(key: 'refit', label: "Recompute boundaries for these #{rooms.size} rooms",
+                       on: { activate: on[:room_geometry].curry[rooms][start.to_i] })
+        builder.text(key: 'refit-note', emphasis: 'subtle',
+                     content: 'Refuses rather than widening the area if these rooms cannot form ' \
+                              'one reachable hunt from the start.')
+      end
+
+      # Find a setting by name. Matching is on Enter or blur, not per
+      # keystroke -- the client emits `change`, never `input`, so there is no
+      # live-filter event to bind. The box says so rather than looking broken.
+      def search(builder, editor, on:)
+        builder.text_input(key: 'search', label: 'Find a setting', search: true,
+                           value: editor.query, placeholder: 'mind, spell, rest - then Enter',
+                           on: { change: on[:search], submit: on[:search] })
+        results = editor.search_results
+        return if editor.query.empty?
+
+        if results.empty?
+          builder.text(key: 'no-hits', emphasis: 'subtle', content: "Nothing matches #{editor.query}.")
+          return
+        end
+        builder.expander(key: 'hits', label: "Matches (#{results.size})", open: true) do
+          builder.collection(results.first(30)) do |field, _index|
+            Page.field_control(builder, editor, field, on: on)
+          end
+          if results.size > 30
+            builder.text(key: 'more', emphasis: 'subtle',
+                         content: "#{results.size - 30} more matches not shown. Narrow the search.")
+          end
+        end
+      end
+
+      # Combat: which reusable plan this hunt follows, and which creatures
+      # get an action sequence of their own.
+      #
+      # The routine text itself is edited as native syntax rather than through
+      # a builder. The browser prototype shipped a JavaScript codec that parsed
+      # and re-emitted that syntax; there is no equivalent here, and inventing
+      # a second interpreter of the engine's language is how the two drift
+      # apart. The vocabulary is listed instead, so the words are discoverable
+      # without being re-implemented.
+      def combat(builder, editor, on:)
+        Page.combat_plan(builder, editor, on: on)
+        Page.creature_routines(builder, editor, on: on)
+        Page.maneuver_reference(builder, editor)
+      end
+
+      def combat_plan(builder, editor, on:)
+        plans = editor.plans.map(&:to_s)
+        builder.group(key: 'plan', label: 'Combat Plan') do
+          if plans.empty?
+            builder.text(key: 'none', emphasis: 'subtle',
+                         content: 'No reusable Combat Plans saved yet. This hunt uses its own routines.')
+            next
+          end
+          options = [{ 'value' => '', 'label' => "Use this hunt's own routines" }] +
+                    plans.map { |name| { 'value' => name, 'label' => name } }
+          builder.select(key: 'choice', label: 'Follow a saved plan', options: options,
+                         value: (editor.draft['combat_plan'] || '').to_s,
+                         on: { change: on[:combat_plan] })
+        end
+      end
+
+      # One row per creature the hunt targets: the routine it uses now, and a
+      # box to give it one of its own.
+      def creature_routines(builder, editor, on:)
+        creatures = editor.target_names
+        builder.group(key: 'routines', label: 'Actions per creature') do
+          builder.text(key: 'main-label', emphasis: 'subtle',
+                       content: 'The main routine runs against any creature without one of its own.')
+          if creatures.empty?
+            builder.text(key: 'no-targets', emphasis: 'subtle',
+                         content: 'No creatures named yet. An empty target list hunts everything ' \
+                                  'otherwise eligible, using the main routine.')
+            next
+          end
+          builder.collection(creatures) do |creature, _index|
+            Page.creature_routine_row(builder, editor, creature, on: on)
+          end
+        end
+      end
+
+      def creature_routine_row(builder, editor, creature, on:)
+        slot = editor.routine_slot(creature)
+        builder.group(key: Page.row_key('c', creature), label: creature) do
+          builder.text(key: 'using', emphasis: 'subtle',
+                       content: slot ? "Its own sequence (slot #{slot})" : 'The main routine')
+          builder.textarea(key: 'text', label: 'Actions', rows: 3,
+                           value: editor.routine_text(slot),
+                           on: { change: on[:creature_sequence].curry[creature] })
+          builder.text(key: 'help', emphasis: 'subtle',
+                       content: 'Native routine syntax, checked by the installed parser when you save. ' \
+                                'Giving a creature its own sequence claims a free routine slot; ' \
+                                'existing routines are kept.')
+        end
+      end
+
+      # The maneuver words the installed engine knows. Listed, not
+      # re-implemented -- the engine owns what they mean.
+      def maneuver_reference(builder, editor)
+        maneuvers = editor.routine_maneuvers
+        return if maneuvers.empty?
+
+        builder.expander(key: 'maneuvers', label: "Maneuver words this engine knows (#{maneuvers.size})") do
+          by_category = maneuvers.group_by { |entry| (entry[:category] || entry['category']).to_s }
+          builder.collection(by_category.to_a) do |(category, entries), index|
+            builder.text(key: "m#{index}", emphasis: 'subtle',
+                         content: "#{category}: #{entries.map { |e| (e[:word] || e['word']).to_s }.sort.join(', ')}")
+          end
         end
       end
 
@@ -466,6 +612,7 @@ module EO
           Page.sheet_picker(builder, editor, current, on: on)
           Page.role_picker(builder, editor, on: on)
           Page.map_surface(builder, editor, current, on: on)
+          Page.footprint_controls(builder, editor, on: on)
         end
       end
 
@@ -761,11 +908,43 @@ module EO
         builder.text(key: 'intro',
                      content: 'Check the whole plan before saving. Validation does not prove ' \
                               'combat effectiveness or area safety.')
+        Page.changes(builder, editor)
         Page.summary(builder, 'errors', 'Errors', editor.errors, 'danger')
         Page.summary(builder, 'warnings', 'Warnings', editor.warnings, 'caution')
         builder.expander(key: 'raw', label: 'Raw configuration') do
           builder.textarea(key: 'yaml', rows: 18, disabled: true, value: Page.render_value(editor.draft))
         end
+      end
+
+      # What this draft would change, before and after. The prototype showed a
+      # diff table; a table cell here can hold only text, so each change is a
+      # row of its own.
+      def changes(builder, editor)
+        changes = editor.changes
+        label = changes.empty? ? 'No unsaved changes' : "Unsaved changes (#{changes.size})"
+        builder.group(key: 'changes', label: label) do
+          if changes.empty?
+            builder.text(key: 'none', emphasis: 'subtle',
+                         content: 'This draft matches what is saved.')
+            next
+          end
+          builder.collection(changes) do |change, index|
+            builder.columns(key: "ch#{index}", count: 3, weights: [2, 3, 3]) do
+              builder.text(key: 'k', slot: '0', content: change['key'].to_s)
+              builder.text(key: 'b', slot: '1', emphasis: 'subtle',
+                           content: Page.change_text(change['before'], 'unset'))
+              builder.text(key: 'a', slot: '2',
+                           content: Page.change_text(change['after'], 'removed'))
+            end
+          end
+        end
+      end
+
+      def change_text(value, absent)
+        return absent if value.nil?
+
+        text = Page.render_value(value)
+        text.empty? ? absent : Page.truncate(text)
       end
 
       def summary(builder, key, title, entries, tone)

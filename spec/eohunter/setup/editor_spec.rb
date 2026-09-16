@@ -248,6 +248,86 @@ RSpec.describe EO::HunterSetup::Editor do
     end
   end
 
+  describe 'combat routines' do
+    it 'reads creature names and slots out of the native target syntax' do
+      editor.on_change('targets', 'kobold, orc(b), giant rat')
+      expect(editor.target_names).to eq(['kobold', 'orc', 'giant rat'])
+      expect(editor.routine_slot('orc')).to eq('b')
+      expect(editor.routine_slot('kobold')).to be_nil
+    end
+
+    it 'gives a creature its own sequence without disturbing the main routine' do
+      editor.on_change('targets', 'kobold, orc')
+      editor.on_change('hunting_commands', 'attack')
+      editor.on_creature_sequence('orc', 'jab;punch')
+      expect(editor.status_error).to be(false)
+      expect(editor.routine_slot('orc')).to eq('b')
+      expect(editor.routine_text('b')).to eq('jab;punch')
+      expect(editor.routine_text(nil)).to eq('attack')
+      expect(editor.target_names).to include('kobold', 'orc')
+    end
+
+    it 'refuses an empty sequence rather than claiming a slot for nothing' do
+      editor.on_change('targets', 'kobold')
+      editor.on_creature_sequence('kobold', '   ')
+      expect(editor.status_error).to be(true)
+      expect(editor.routine_slot('kobold')).to be_nil
+    end
+
+    it 'links and unlinks a reusable Combat Plan' do
+      editor.on_set_combat_plan('Standard')
+      expect(editor.draft['combat_plan']).to eq('Standard')
+      editor.on_set_combat_plan('')
+      expect(editor.draft).not_to have_key('combat_plan')
+    end
+
+    it 'publishes the maneuver words the installed engine knows' do
+      expect(editor.routine_maneuvers).not_to be_empty
+      expect(editor.routine_maneuvers.first).to include(:word, :category)
+    end
+  end
+
+  describe 'search' do
+    it 'matches on every term, across key, label, help and legacy aliases' do
+      editor.on_search('flee count')
+      expect(editor.search_results.map { |field| field['key'] }).to include('flee_count')
+      editor.on_search('zzzznothing')
+      expect(editor.search_results).to be_empty
+    end
+
+    it 'returns nothing for an empty query rather than everything' do
+      editor.on_search('   ')
+      expect(editor.query).to eq('')
+      expect(editor.search_results).to be_empty
+    end
+  end
+
+  describe 'unsaved changes' do
+    it 'lists what a save would change, with what it changes from' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_save
+      expect(editor.changes).to be_empty
+
+      editor.on_change('hunting_stance', 'defensive')
+      editor.on_change('flee_count', '3')
+      expect(editor.changes).to contain_exactly(
+        { 'key' => 'flee_count', 'before' => nil, 'after' => '3' },
+        { 'key' => 'hunting_stance', 'before' => 'offensive', 'after' => 'defensive' }
+      )
+    end
+
+    it 'shows a cleared setting as a change, not as absent' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_save
+      editor.on_change('hunting_stance', '')
+      expect(editor.changes).to contain_exactly(
+        { 'key' => 'hunting_stance', 'before' => 'offensive', 'after' => nil }
+      )
+    end
+  end
+
   describe 'document management' do
     before do
       editor.on_rename('forest')
