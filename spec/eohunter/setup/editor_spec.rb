@@ -1,0 +1,409 @@
+# frozen_string_literal: true
+
+require 'tmpdir'
+require 'fileutils'
+require_relative '../../../scripts/eohunter/setup/runtime'
+
+# Load the engine policy classes and setup modules before the describe
+# block names Editor.
+EO::HunterSetup::Runtime.load_support(File.expand_path('../../../scripts', __dir__))
+
+RSpec.describe EO::HunterSetup::Editor do
+  around do |example|
+    Dir.mktmpdir('hunter-editor') do |directory|
+      @directory = directory
+      example.run
+    end
+  end
+
+  let(:app) do
+    EO::HunterSetup::Runtime.app(
+      data_dir: @directory, game: 'GSIV', character: 'Example',
+      char_settings: {}, templates: [], rooms: [], uid_resolver: ->(_uid) { [] }
+    )
+  end
+  let(:editor) { described_class.new(app: app) }
+
+  it 'exposes every schema field, and assigns each one to a rendered page' do
+    expect(editor.fields).not_to be_empty
+    placed = described_class::SETTINGS_PAGES.flat_map { |page| editor.fields_for(page) }
+    # A field whose page has no tab would be unreachable in the editor.
+    expect(placed.map { |field| field['key'] }).to match_array(editor.fields.map { |field| field['key'] })
+  end
+
+  it 'starts clean and reports unsaved edits' do
+    expect(editor).not_to be_dirty
+    editor.on_change('hunting_stance', 'offensive')
+    expect(editor).to be_dirty
+    expect(editor.settings).to include('hunting_stance' => 'offensive')
+  end
+
+  it 'removes a setting when it is cleared, so the hunt falls back to its default' do
+    editor.on_change('hunting_stance', 'offensive')
+    editor.on_change('hunting_stance', '')
+    expect(editor.settings).not_to have_key('hunting_stance')
+  end
+
+  it 'saves, keeps the returned revision, and saves again without a conflict' do
+    editor.on_rename('forest')
+    editor.on_change('hunting_stance', 'offensive')
+    expect(editor.on_save).to be(true)
+    expect(editor.status_error).to be(false)
+    first = editor.revision
+    expect(first).to be_a(String)
+    expect(editor).not_to be_dirty
+
+    editor.on_change('hunting_stance', 'defensive')
+    editor.on_save
+    expect(editor.status_error).to be(false)
+    expect(editor.revision).not_to eq(first)
+    expect(editor.profiles).to include('forest')
+  end
+
+  it 'refuses to save an unnamed draft rather than writing one' do
+    editor.on_change('hunting_stance', 'offensive')
+    expect(editor.on_save).to be(true)
+    expect(editor.status_error).to be(true)
+    expect(editor.profiles).to be_empty
+  end
+
+  it 'reports a save conflict instead of overwriting a document edited elsewhere' do
+    editor.on_rename('forest')
+    editor.on_save
+    other = described_class.new(app: app)
+    other.on_load('forest')
+    other.on_change('flee_count', '3')
+    other.on_save
+    expect(other.status_error).to be(false)
+
+    editor.on_change('flee_count', '9')
+    editor.on_save
+    expect(editor.status_error).to be(true)
+    expect(editor.status).to match(/reload/i)
+  end
+
+  it 'loads a saved hunt back into a clean draft' do
+    editor.on_rename('forest')
+    editor.on_change('hunting_stance', 'offensive')
+    editor.on_save
+
+    fresh = described_class.new(app: app)
+    fresh.on_load('forest')
+    expect(fresh.name).to eq('forest')
+    expect(fresh.settings).to include('hunting_stance' => 'offensive')
+    expect(fresh).not_to be_dirty
+  end
+
+  it 'reverts to the last saved state' do
+    editor.on_rename('forest')
+    editor.on_change('hunting_stance', 'offensive')
+    editor.on_save
+    editor.on_change('hunting_stance', 'defensive')
+    editor.on_revert
+    expect(editor.settings).to include('hunting_stance' => 'offensive')
+    expect(editor).not_to be_dirty
+  end
+
+  it 'validates without saving and keeps the report' do
+    editor.on_rename('forest')
+    editor.on_change('hunting_stance', 'offensive')
+    expect(editor.on_validate).to be(true)
+    expect(editor.validation).not_to be_nil
+    expect(editor.profiles).to be_empty
+  end
+
+  describe 'list-shaped settings' do
+    # The engine's split/rooms cleaners split a String. Handed an Array they
+    # stringify it, so ["101"] comes back as ["[\"101\"]"] -- a silent
+    # corruption. Everything list-shaped is therefore stored as text.
+    it 'keeps a comma list as text through a save and reload' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_scripts', 'first, second')
+      editor.on_save
+      reloaded = described_class.new(app: app)
+      reloaded.on_load('forest')
+      expect(reloaded.settings['hunting_scripts']).to eq('first, second')
+      expect(EO::Engine::Profile.new(reloaded.settings).settings['hunting_scripts'])
+        .to eq(%w[first second])
+    end
+
+    it 'stores map-assigned boundaries as text the engine reads back as room ids' do
+      editor.on_assign_room('hunting_boundaries', 101)
+      editor.on_assign_room('hunting_boundaries', 202)
+      expect(editor.settings['hunting_boundaries']).to be_a(String)
+      expect(EO::Engine::Profile.new(editor.settings).settings['hunting_boundaries'])
+        .to eq([101, 202])
+    end
+
+    it 'removes a boundary the map clears, and drops the setting when none are left' do
+      editor.on_assign_room('hunting_boundaries', 101)
+      editor.on_assign_room('hunting_boundaries', 101)
+      expect(editor.settings).not_to have_key('hunting_boundaries')
+    end
+  end
+
+  describe 'ordered list editing' do
+    it 'adds, reorders and removes entries, keeping order meaningful' do
+      editor.on_list_add('hunting_scripts', 'first')
+      editor.on_list_add('hunting_scripts', 'second')
+      editor.on_list_add('hunting_scripts', 'third')
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[first second third])
+
+      editor.on_list_move('hunting_scripts', 2, -1)
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[first third second])
+
+      editor.on_list_remove('hunting_scripts', 0)
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[third second])
+    end
+
+    it 'ignores a blank addition and a move off either end' do
+      editor.on_list_add('hunting_scripts', '  ')
+      expect(editor.settings).not_to have_key('hunting_scripts')
+      editor.on_list_add('hunting_scripts', 'only')
+      expect(editor.on_list_move('hunting_scripts', 0, -1)).to be(false)
+      expect(editor.on_list_move('hunting_scripts', 0, 1)).to be(false)
+      expect(editor.list_entries('hunting_scripts')).to eq(['only'])
+    end
+
+    it 'drops an entry that is blanked, and the setting once it is empty' do
+      editor.on_list_add('hunting_scripts', 'one')
+      editor.on_list_set('hunting_scripts', 0, '')
+      expect(editor.settings).not_to have_key('hunting_scripts')
+    end
+
+    it 'reads an existing comma setting as entries' do
+      editor.on_change('hunting_scripts', 'a, b , c')
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[a b c])
+    end
+  end
+
+  describe 'the guided path' do
+    it 'starts in the full editor and enters the wizard at step one' do
+      expect(editor).not_to be_guided
+      editor.on_toggle_guided
+      expect(editor).to be_guided
+      expect(editor.step).to eq(described_class::STEP_IDS.first)
+      expect(editor.step_number).to eq(1)
+    end
+
+    it 'walks forward and back, and stops at both ends' do
+      editor.on_toggle_guided
+      expect(editor.on_step_by(-1)).to be(false)
+      (described_class::STEP_IDS.size - 1).times { editor.on_step_by(1) }
+      expect(editor.step).to eq(described_class::STEP_IDS.last)
+      expect(editor.on_step_by(1)).to be(false)
+    end
+
+    it 'jumps to a named step and refuses one it does not have' do
+      editor.on_toggle_guided
+      expect(editor.on_step('rest')).to be(true)
+      expect(editor.step).to eq('rest')
+      expect(editor.on_step('nonsense')).to be(false)
+      expect(editor.step).to eq('rest')
+    end
+
+    it 'edits the same draft as the full editor, not a separate document' do
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_toggle_guided
+      expect(editor.settings).to include('hunting_stance' => 'offensive')
+      editor.on_change('flee_count', '3')
+      editor.on_toggle_guided
+      expect(editor).not_to be_guided
+      expect(editor.settings).to include('flee_count' => '3')
+    end
+
+    it 'asks about only a handful of settings per step' do
+      # The point of the wizard: 23 curated fields across five steps, against
+      # 119 in the tabs.
+      described_class::STEPS.each do |step|
+        step[:groups].each do |_title, keys|
+          expect(keys.size).to be <= 4
+          expect(editor.fields.map { |field| field['key'] } & keys).to match_array(keys)
+        end
+      end
+    end
+  end
+
+  describe 'injury policy' do
+    it 'sets and clears a hunt-specific override without touching the character default' do
+      editor.on_set_hunt_injury_policy('Careful')
+      expect(editor.draft['injury_policy']).to eq('Careful')
+      editor.on_set_hunt_injury_policy('')
+      expect(editor.draft).not_to have_key('injury_policy')
+    end
+  end
+
+  describe 'area resolution' do
+    it 'reports rather than raises when there is no creature or map data' do
+      expect(editor.areas).to eq([])
+      editor.on_resolve_area('Nowhere')
+      expect(editor.status_error).to be(true)
+      expect(editor.area).to be_nil
+    end
+
+    it 'refuses to apply an area that was never resolved' do
+      editor.on_apply_area
+      expect(editor.status_error).to be(true)
+      expect(editor.settings).not_to have_key('hunting_room_id')
+    end
+  end
+
+  describe 'combat routines' do
+    it 'reads creature names and slots out of the native target syntax' do
+      editor.on_change('targets', 'kobold, orc(b), giant rat')
+      expect(editor.target_names).to eq(['kobold', 'orc', 'giant rat'])
+      expect(editor.routine_slot('orc')).to eq('b')
+      expect(editor.routine_slot('kobold')).to be_nil
+    end
+
+    it 'gives a creature its own sequence without disturbing the main routine' do
+      editor.on_change('targets', 'kobold, orc')
+      editor.on_change('hunting_commands', 'attack')
+      editor.on_creature_sequence('orc', 'jab;punch')
+      expect(editor.status_error).to be(false)
+      expect(editor.routine_slot('orc')).to eq('b')
+      expect(editor.routine_text('b')).to eq('jab;punch')
+      expect(editor.routine_text(nil)).to eq('attack')
+      expect(editor.target_names).to include('kobold', 'orc')
+    end
+
+    it 'refuses an empty sequence rather than claiming a slot for nothing' do
+      editor.on_change('targets', 'kobold')
+      editor.on_creature_sequence('kobold', '   ')
+      expect(editor.status_error).to be(true)
+      expect(editor.routine_slot('kobold')).to be_nil
+    end
+
+    it 'links and unlinks a reusable Combat Plan' do
+      editor.on_set_combat_plan('Standard')
+      expect(editor.draft['combat_plan']).to eq('Standard')
+      editor.on_set_combat_plan('')
+      expect(editor.draft).not_to have_key('combat_plan')
+    end
+
+    it 'publishes the maneuver words the installed engine knows' do
+      expect(editor.routine_maneuvers).not_to be_empty
+      expect(editor.routine_maneuvers.first).to include(:word, :category)
+    end
+  end
+
+  describe 'search' do
+    it 'matches on every term, across key, label, help and legacy aliases' do
+      editor.on_search('flee count')
+      expect(editor.search_results.map { |field| field['key'] }).to include('flee_count')
+      editor.on_search('zzzznothing')
+      expect(editor.search_results).to be_empty
+    end
+
+    it 'returns nothing for an empty query rather than everything' do
+      editor.on_search('   ')
+      expect(editor.query).to eq('')
+      expect(editor.search_results).to be_empty
+    end
+  end
+
+  describe 'unsaved changes' do
+    it 'lists what a save would change, with what it changes from' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_save
+      expect(editor.changes).to be_empty
+
+      editor.on_change('hunting_stance', 'defensive')
+      editor.on_change('flee_count', '3')
+      expect(editor.changes).to contain_exactly(
+        { 'key' => 'flee_count', 'before' => nil, 'after' => '3' },
+        { 'key' => 'hunting_stance', 'before' => 'offensive', 'after' => 'defensive' }
+      )
+    end
+
+    it 'shows a cleared setting as a change, not as absent' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_save
+      editor.on_change('hunting_stance', '')
+      expect(editor.changes).to contain_exactly(
+        { 'key' => 'hunting_stance', 'before' => 'offensive', 'after' => nil }
+      )
+    end
+  end
+
+  describe 'document management' do
+    before do
+      editor.on_rename('forest')
+      editor.on_save
+      editor.on_new
+      editor.on_rename('marsh')
+      editor.on_save
+    end
+
+    it 'sets and clears the hunt an argument-free ;eohunter would start' do
+      editor.on_set_active('forest')
+      expect(editor.active_profile).to eq('forest')
+      expect(editor.status).to match(/did not start/i)
+      editor.on_set_active(nil)
+      expect(editor.active_profile).to be_nil
+    end
+
+    it 'hides and restores a name without touching the profile' do
+      editor.on_set_hidden('marsh', true)
+      expect(editor).to be_hidden('marsh')
+      expect(editor.profiles).to include('marsh')
+      editor.on_set_hidden('marsh', false)
+      expect(editor).not_to be_hidden('marsh')
+    end
+
+    it 'deletes only after confirmation, and clears the draft it was editing' do
+      editor.on_load('marsh')
+      editor.on_request_delete('marsh')
+      expect(editor.pending_delete).to include(name: 'marsh')
+      expect(editor.profiles).to include('marsh')
+      editor.on_confirm_delete
+      expect(editor.profiles).not_to include('marsh')
+      expect(editor.name).to eq('')
+      expect(editor.revision).to be_nil
+    end
+
+    it 'keeps the document when the confirmation is declined' do
+      editor.on_request_delete('marsh')
+      editor.on_cancel_delete
+      expect(editor.pending_delete).to be_nil
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'refuses to delete the default hunt' do
+      editor.on_set_active('marsh')
+      editor.on_request_delete('marsh')
+      editor.on_confirm_delete
+      expect(editor.status_error).to be(true)
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'refuses a delete whose document changed after the confirmation was raised' do
+      editor.on_request_delete('marsh')
+      pending_revision = editor.pending_delete[:revision]
+      other = described_class.new(app: app)
+      other.on_load('marsh')
+      other.on_change('flee_count', '2')
+      other.on_save
+      editor.on_delete('marsh', pending_revision)
+      expect(editor.status_error).to be(true)
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'starts a clean draft that writes nothing until saved' do
+      editor.on_load('forest')
+      editor.on_new
+      expect(editor.name).to eq('')
+      expect(editor.settings).to be_empty
+      expect(editor).not_to be_dirty
+      expect(editor.profiles).to contain_exactly('forest', 'marsh')
+    end
+  end
+
+  it 'surfaces a validation error rather than raising out of a handler' do
+    editor.on_change('flee_count', 'not a number')
+    editor.on_validate
+    expect(editor.status).to be_a(String)
+  end
+end

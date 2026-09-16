@@ -119,6 +119,22 @@ module EOHunter
     # @return [String]
     def strip_pragma(source) = source.sub(PRAGMA, '')
 
+    # One setup module, guarded so a second copy in the same session is a
+    # no-op, and with its relative requires dropped -- the built file has no
+    # directory to resolve them against.
+    #
+    # @param source [String] one setup module's source
+    # @param part [String] setup/name, matching its class
+    # @return [String] guarded source without relative disk dependencies
+    def setup_source(source, part)
+      name = File.basename(part).split('_').map(&:capitalize).join
+      body = source.gsub(/^require_relative .*
+/, '').sub(/^module EO$/, 'module ::EO')
+      "unless defined?(::EO::HunterSetup::#{name})
+#{body}end
+"
+    end
+
     # engine.rb ends by loading the parts from its directory; the built
     # file has them inline instead.
     #

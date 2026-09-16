@@ -1,0 +1,157 @@
+=begin
+  eohunter-setup: hunt profile editor, rendered through Lich's WebUI.
+  Start with ;eohunter setup or ;eohunter-setup. Stop with ;kill eohunter-setup.
+  Saves EOHunter configuration only; it never starts a hunt.
+=end
+
+me = Script.current
+exit if Script.list.any? { |other| other.name == me.name && !other.equal?(me) }
+
+# Only if Lich has not already loaded it. `require` keys on the literal path,
+# and Lich's own LIB_DIR can differ from this one by case alone
+# (C:/gemstone vs C:/Gemstone) -- which Windows treats as the same file and
+# Ruby does not. Requiring it again would define a second
+# Lich::WebUI::Contract, and a tree built against one set of constants then
+# fails validation against the other.
+require File.join(LIB_DIR, 'webui.rb') unless defined?(::Lich::WebUI::Contract)
+load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'runtime.rb') unless defined?(::EO::HunterSetup::Runtime)
+EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
+
+app = EO::HunterSetup::Runtime.app(
+  data_dir: DATA_DIR, game: XMLData.game, character: Char.name,
+  char_settings: CharSettings.to_hash,
+  # Lich namespaces this as Lich::Gemstone::CreatureTemplate and does not
+  # expose a bare constant, so testing the short name alone would silently
+  # hand the editor an empty creature list.
+  templates: if defined?(Lich::Gemstone::CreatureTemplate)
+               Lich::Gemstone::CreatureTemplate.all
+             elsif defined?(CreatureTemplate)
+               CreatureTemplate.all
+             else
+               []
+             end,
+  rooms: Map.list, uid_resolver: ->(uid) { Map.ids_from_uid(uid) }
+)
+editor = EO::HunterSetup::Editor.new(app: app)
+
+# The page is torn down with this script, but the WebUI service is shared with
+# every other script using it, so terminate_owner -- never service.stop.
+before_dying { Lich::WebUI.terminate_owner(me) }
+
+closed = Queue.new
+page = nil
+
+# Re-render after a handler changes the draft.
+#
+# The runtime already schedules a refresh itself for every viewer-state event
+# -- text_input/checkbox/select change, tabs select, expander toggle and the
+# rest (runtime.rb:263, viewer_state_event?). Refreshing again from the handler
+# is not merely redundant: the two renders race, the generation runs ahead of
+# what the client was told, and its next event is refused as stale. One tab
+# click drove the generation from 1 to 8 that way.
+#
+# So only the events the runtime does NOT cover are refreshed here: button
+# activates and the dialog response. Handlers run on the dispatcher thread, so
+# this stays cheap -- mutate, refresh, return.
+refresh = lambda do |changed|
+  Lich::WebUI.refresh(page) if changed && page
+  changed
+end
+
+# For events the runtime refreshes on its own: mutate and report, but do not
+# ask for a second render.
+quiet = ->(changed) { changed }
+
+# A handler is called with a Lich::WebUI::Runtime::EventContext -- a Data
+# object carrying viewer_id/page/component/event/payload -- not a Hash. Its
+# fields are read through #payload, and `event[:value]` raises NoMethodError,
+# which the dispatcher catches and logs. That failure mode is silent: the
+# control simply does nothing.
+handlers = {
+  rename: ->(event) { quiet.call(editor.on_rename(event.payload[:value])) },
+  validate: ->(_event) { refresh.call(editor.on_validate) },
+  save: ->(_event) { refresh.call(editor.on_save) },
+  revert: ->(_event) { refresh.call(editor.on_revert) },
+  select_page: ->(_event) { false },
+  load: ->(name, _event) { refresh.call(editor.on_load(name)) },
+  change: ->(key, event) { quiet.call(editor.on_change(key, event.payload[:value])) },
+  new: ->(_event) { refresh.call(editor.on_new) },
+  set_active: ->(name, _event) { refresh.call(editor.on_set_active(name)) },
+  set_hidden: ->(name, hidden, _event) { refresh.call(editor.on_set_hidden(name, hidden)) },
+  copy_legacy: ->(name, _event) { refresh.call(editor.on_copy_legacy(name)) },
+  request_delete: ->(name, _event) { refresh.call(editor.on_request_delete(name)) },
+  # The dialog reports which button closed it; anything but Delete keeps the
+  # document, including a dialog dismissed without a choice.
+  list_set: ->(key, index, event) { quiet.call(editor.on_list_set(key, index, event.payload[:value])) },
+  list_add: ->(key, event) { quiet.call(editor.on_list_add(key, event.payload[:value])) },
+  list_remove: ->(key, index, _event) { refresh.call(editor.on_list_remove(key, index)) },
+  list_move: ->(key, index, offset, _event) { refresh.call(editor.on_list_move(key, index, offset)) },
+  toggle_map: ->(_event) { refresh.call(editor.on_toggle_map) },
+  toggle_guided: ->(_event) { refresh.call(editor.on_toggle_guided) },
+  step: ->(id, _event) { refresh.call(editor.on_step(id)) },
+  step_by: ->(offset, _event) { refresh.call(editor.on_step_by(offset)) },
+  resolve_area: ->(event) { refresh.call(editor.on_resolve_area(event.payload[:value])) },
+  choose_zone: ->(event) { refresh.call(editor.on_choose_zone(event.payload[:value])) },
+  choose_creature: ->(name, _event) { refresh.call(editor.on_choose_creature(name)) },
+  apply_area: ->(_event) { refresh.call(editor.on_apply_area) },
+  combat_plan: ->(event) { quiet.call(editor.on_set_combat_plan(event.payload[:value])) },
+  search: ->(event) { quiet.call(editor.on_search(event.payload[:value])) },
+  creature_sequence: lambda { |creature, event|
+    refresh.call(editor.on_creature_sequence(creature, event.payload[:value]))
+  },
+  hunt_injury_policy: ->(event) { quiet.call(editor.on_set_hunt_injury_policy(event.payload[:value])) },
+  character_injury_policy: ->(event) { refresh.call(editor.on_set_character_injury_policy(event.payload[:value])) },
+  room_geometry: ->(rooms, start, _event) { refresh.call(editor.on_room_geometry(rooms, start)) },
+  sheet: ->(event) { quiet.call(editor.on_sheet(event.payload[:value])) },
+  assign_role: ->(event) { quiet.call(editor.on_assign_role(event.payload[:value])) },
+  map_click: ->(event) { refresh.call(editor.on_map_click(event.payload[:region], event.payload[:button])) },
+  delete_response: lambda { |event|
+    changed = event.payload[:button] == 'delete' ? editor.on_confirm_delete : editor.on_cancel_delete
+    refresh.call(changed)
+  }
+}
+
+# The map sheets are read from Lich's own MAP_DIR. register_files needs the
+# directory to sit inside a registered application, script or user root, and
+# script_root is caller-supplied -- so naming MAP_DIR as both the directory and
+# the root is what lets an installed map serve without a Lich change.
+begin
+  if defined?(MAP_DIR) && File.directory?(MAP_DIR.to_s)
+    EO::HunterSetup::Page.map_route =
+      Lich::WebUI.service.register_files('eohunter-maps', MAP_DIR, owner: me, script_root: MAP_DIR)
+  end
+rescue StandardError => error
+  # A map that cannot be served is not a reason to refuse the editor. Leaving
+  # the route nil is what keeps that true: Page draws the rooms without the
+  # artwork, rather than naming a file the runtime would refuse -- and it
+  # refuses during attach, which would stop the whole page rendering.
+  EO::HunterSetup::Page.map_route = nil
+  Lich::Messaging.msg('warn', "eohunter setup: installed maps unavailable (#{error.message})")
+end
+
+page = Lich::WebUI.page(
+  owner: me, id: 'eohunter-setup', title: 'EOHunter - Hunt setup',
+  props: { bare: true },
+  on: { close: ->(event) { closed.push(event.payload[:reason]) } }
+) { |builder| EO::HunterSetup::Page.render(builder, editor, on: handlers) }
+
+# The WebUI listener is one accept-loop thread, and a thread created from a
+# script belongs to that script's ThreadGroup -- which Lich kills when the
+# script stops. Starting the shared service from here would hand it a thread
+# that dies on ;kill, taking the WebUI down for every other script. Start it
+# from the default group so it outlives us.
+starter = Thread.new { Lich::WebUI.start }
+ThreadGroup::Default.add(starter)
+starter.join
+
+# The per-page refresh and dispatcher threads that Lich creates later do belong
+# to this script, and that is right: they serve this page and should stop when
+# it does. Only the shared accept loop must outlive us.
+
+url = Lich::WebUI.launch_url(page: page)
+Lich::Messaging.msg('info', "eohunter setup: #{url}")
+# An app-mode window needs Chrome or Edge; without one the printed URL above
+# still opens anywhere. Launch failure is not an error.
+Lich::WebUI.open(page: page)
+
+closed.pop
