@@ -25,24 +25,29 @@ Three things are worth knowing before starting:
 
 ## Getting at it
 
-With the WebUI merged, `lib/api/webui.rb` is the whole script-facing surface:
+`Lich::WebUI` is the script-facing surface:
 
 ```ruby
-Lich::API.webui_page(owner:, id:, title:, props:, on:) { |b| ... }
-Lich::API.webui_open(page:)          # or webui_launch_url(page:)
-Lich::API.webui_refresh(page)
-Lich::API.webui_terminate_owner(owner)
-Lich::API.webui_modal(**options)
-Lich::API.webui_contract_version     # => "2.15.0"
+Lich::WebUI.page(owner:, id:, title:, props:, on:) { |b| ... }
+Lich::WebUI.open(page:)          # or launch_url(page:)
+Lich::WebUI.refresh(page)
+Lich::WebUI.terminate_owner(owner)
+Lich::WebUI.service.register_files(alias, dir, owner:, script_root:)
+Lich::WebUI::Contract::VERSION   # => "2.15.1"
 ```
 
-One detail survives the merge and is worth knowing: nothing in Lich requires
-that file at boot, and `--webui-dev` gates only the login launcher and
-`ScriptScope` (`lib/main/main.rb:197-222`) — not the library. It loads
-standalone with no Lich boot state and no GTK, so a plain
+There was a `lib/api/webui.rb` wrapper of ten one-line delegations. It was
+deleted as dead code (lich-5 `29f28fd6`) on the grounds that "scripts reach
+the same functions through `Lich::WebUI` directly" -- which is what this port
+does. Worth knowing if you read an older draft of this document.
+
+Nothing in Lich requires the WebUI at boot, and `--webui-dev` gates only the
+login launcher and `ScriptScope` (`lib/main/main.rb:197-222`) -- not the
+library. `lib/webui.rb` loads standalone with no Lich boot state and no GTK,
+so a plain
 
 ```ruby
-require File.join(LIB_DIR, 'api', 'webui.rb')
+require File.join(LIB_DIR, 'webui.rb')
 ```
 
 is enough, in any session, flag or no flag. Verified by running it.

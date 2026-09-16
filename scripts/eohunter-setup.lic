@@ -7,7 +7,7 @@
 me = Script.current
 exit if Script.list.any? { |other| other.name == me.name && !other.equal?(me) }
 
-require File.join(LIB_DIR, 'api', 'webui.rb')
+require File.join(LIB_DIR, 'webui.rb')
 load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'runtime.rb') unless defined?(::EO::HunterSetup::Runtime)
 EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
 
@@ -21,7 +21,7 @@ editor = EO::HunterSetup::Editor.new(app: app)
 
 # The page is torn down with this script, but the WebUI service is shared with
 # every other script using it, so terminate_owner -- never service.stop.
-before_dying { Lich::API.webui_terminate_owner(me) }
+before_dying { Lich::WebUI.terminate_owner(me) }
 
 closed = Queue.new
 page = nil
@@ -29,7 +29,7 @@ page = nil
 # Re-render after a handler changes the draft. Handlers run on the dispatcher
 # thread, so this must stay cheap: mutate, refresh, return.
 refresh = lambda do |changed|
-  Lich::API.webui_refresh(page) if changed && page
+  Lich::WebUI.refresh(page) if changed && page
   changed
 end
 
@@ -77,7 +77,7 @@ rescue StandardError => error
   Lich::Messaging.msg('warn', "eohunter setup: installed maps unavailable (#{error.message})")
 end
 
-page = Lich::API.webui_page(
+page = Lich::WebUI.page(
   owner: me, id: 'eohunter-setup', title: 'EOHunter - Hunt setup',
   props: { bare: true },
   on: { close: ->(event) { closed.push(event[:reason]) } }
@@ -88,7 +88,7 @@ page = Lich::API.webui_page(
 # script stops. Starting the shared service from here would hand it a thread
 # that dies on ;kill, taking the WebUI down for every other script. Start it
 # from the default group so it outlives us.
-starter = Thread.new { Lich::API.webui_start }
+starter = Thread.new { Lich::WebUI.start }
 ThreadGroup::Default.add(starter)
 starter.join
 
@@ -96,10 +96,10 @@ starter.join
 # to this script, and that is right: they serve this page and should stop when
 # it does. Only the shared accept loop must outlive us.
 
-url = Lich::API.webui_launch_url(page: page)
+url = Lich::WebUI.launch_url(page: page)
 Lich::Messaging.msg('info', "eohunter setup: #{url}")
 # An app-mode window needs Chrome or Edge; without one the printed URL above
 # still opens anywhere. Launch failure is not an error.
-Lich::API.webui_open(page: page)
+Lich::WebUI.open(page: page)
 
 closed.pop

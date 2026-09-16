@@ -13,7 +13,7 @@ webui = ENV.fetch('LICH_DIR', 'C:/Gemstone/lich-5')
 webui_api = File.join(webui, 'lib', 'webui', 'page.rb')
 if File.exist?(webui_api)
   # Only the render half of the WebUI: page -> tree_builder -> validator ->
-  # contract. Requiring lib/api/webui.rb instead would drag in
+  # contract. Requiring lib/webui.rb instead would drag in
   # window_presentation and Lich's frontend, and with them fiddle and os,
   # none of which a tree needs to be built and validated.
   require webui_api

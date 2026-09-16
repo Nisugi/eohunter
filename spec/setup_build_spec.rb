@@ -13,8 +13,8 @@ RSpec.describe EOHunter::SetupBuild do
 
   it 'keeps the script header and the lifecycle around the inlined modules' do
     expect(built).to start_with("=begin\n")
-    expect(built).to include("require File.join(LIB_DIR, 'api', 'webui.rb')")
-    expect(built).to include('Lich::API.webui_terminate_owner(me)')
+    expect(built).to include("require File.join(LIB_DIR, 'webui.rb')")
+    expect(built).to include('Lich::WebUI.terminate_owner(me)')
     expect(built).to end_with("closed.pop\n")
   end
 
