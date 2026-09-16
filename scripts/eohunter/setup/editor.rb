@@ -37,6 +37,32 @@ module EO
                SETTINGS_PAGES.map { |page| [page, TITLES[page] || page.split('_').map(&:capitalize).join(' ')] } +
                [%w[review Review]]).freeze
 
+      # The guided path: five steps, each a plain-language question rather than
+      # a settings page. Each step names the handful of settings it asks about,
+      # grouped under the question it answers -- the point of the wizard is
+      # that it does NOT show all 119 fields.
+      STEPS = [
+        { id: 'character', title: 'Your character', hint: 'Equipment and usual settings',
+          groups: [['What should be in your hands?', %w[hunting_right_hand hunting_left_hand]],
+                   ['Where do you keep ammunition?', %w[ammo ammo_container]]] },
+        { id: 'area', title: 'Area & creatures', hint: 'Where and what to hunt',
+          groups: [['What do you want to hunt?', %w[targets invalid_targets always_flee_from]],
+                   ['Use room numbers from your map', %w[hunting_room_id hunting_boundaries]]] },
+        { id: 'combat', title: 'Combat approach', hint: 'Usual sequence and exceptions',
+          groups: [['What do you do to a creature?', %w[hunting_commands]],
+                   ['How many creatures can you handle?', %w[flee_count lone_targets_only]],
+                   ['How do you stand and move?', %w[hunting_stance wander_stance]]] },
+        { id: 'rest', title: 'Rest & recovery', hint: 'When to return and recover',
+          groups: [['Where will you recover?', %w[resting_room_id field_rest_room_id]],
+                   ['When should you return?', %w[fried oom encumbered]],
+                   ['What happens at rest?', %w[resting_scripts resting_commands]],
+                   ['When should hunting resume?', %w[rest_till_exp rest_till_mana]]] },
+        { id: 'review', title: 'Review & save', hint: 'Check the whole plan', groups: [] }
+      ].freeze
+
+      # @return [Array<String>] the step identities, in order
+      STEP_IDS = STEPS.map { |step| step[:id] }.freeze
+
       attr_reader :app, :boot, :draft, :name, :kind, :revision, :validation, :status, :status_error,
                   :pending_delete
 
@@ -86,6 +112,48 @@ module EO
 
         @pending_delete = nil
         on_delete(pending[:name], pending[:revision], kind: pending[:kind])
+      end
+
+      # @return [Boolean] whether the guided path is showing
+      def guided? = @guided == true
+
+      # @return [String] the step being shown
+      def step = @step ||= STEP_IDS.first
+
+      # @return [Integer] its 1-based position, for "step N of 5"
+      def step_number = STEP_IDS.index(step).to_i + 1
+
+      # @return [Hash] the current step's definition
+      def step_definition = STEPS.find { |entry| entry[:id] == step } || STEPS.first
+
+      # Enter or leave the guided path. Both views edit the same draft: the
+      # wizard is a way through the settings, not a separate document.
+      # @return [Boolean] whether to re-render
+      def on_toggle_guided
+        @guided = !guided?
+        @step = STEP_IDS.first if guided?
+        note(guided? ? 'Guided setup. The same draft, one question at a time.' : 'Full editor.')
+      end
+
+      # Show a particular step.
+      # @param id [String] step identity
+      # @return [Boolean] whether to re-render
+      def on_step(id)
+        return false unless STEP_IDS.include?(id.to_s)
+
+        @step = id.to_s
+        true
+      end
+
+      # Move one step along, stopping at either end.
+      # @param offset [Integer] -1 back, 1 forward
+      # @return [Boolean] whether to re-render
+      def on_step_by(offset)
+        index = STEP_IDS.index(step).to_i + offset
+        return false unless index.between?(0, STEP_IDS.size - 1)
+
+        @step = STEP_IDS[index]
+        true
       end
 
       # @return [Array<Hash>] every field descriptor the schema publishes
@@ -256,6 +324,144 @@ module EO
         @validation = nil
         @map = nil
         true
+      end
+
+      # Hunting areas the installed creature and map data know about, with the
+      # creatures and map sheets each one has. Read once: the catalogue is
+      # derived from installed data, not from the draft.
+      # @return [Array<Hash>] area records, or [] when there is no map data
+      def areas
+        @areas ||= Array(@app.call('action' => 'areas'))
+      rescue StandardError => error
+        @area_error = error.message
+        @areas = []
+      end
+
+      # @return [String, nil] why the area catalogue could not be read
+      attr_reader :area_error
+
+      # @return [Hash, nil] the last resolved area: its rooms, boundaries and
+      #   the creatures living there
+      attr_reader :area
+
+      # @return [String, nil] the area name the draft names
+      def area_name = @draft['area'] || settings['area']
+
+      # Resolve an area into rooms and boundaries, without writing anything.
+      # Nothing here is field-verified; it is a proposal for the player to
+      # approve.
+      # @param name [String] habitat name
+      # @param creature_names [Array<String>, nil] creatures to hunt
+      # @param zone [String, nil] named subarea, where one is required
+      # @param map_image [String, nil] restrict to one sheet
+      # @return [Boolean] whether to re-render
+      def on_resolve_area(name, creature_names: nil, zone: nil, map_image: nil)
+        @area = @app.call('action' => 'area', 'area' => name,
+                          'creature_names' => creature_names, 'zone' => zone,
+                          'map_image' => map_image)
+        @area_name = name
+        note(area_summary)
+      rescue StandardError => error
+        @area = nil
+        note(error.message, error: true)
+      end
+
+      # Put the resolved area into the draft: its start room, boundaries and
+      # the creature list. This is the step that actually edits the hunt, and
+      # it is deliberately separate from resolving, so nothing changes until
+      # the player accepts the proposal.
+      # @return [Boolean] whether to re-render
+      def on_apply_area
+        return note('Resolve an area first.', error: true) unless @area
+
+        rooms = Array(@area[:room_ids])
+        return note('That area resolved to no mapped rooms.', error: true) if rooms.empty?
+
+        on_change('hunting_room_id', rooms.first)
+        write_list('hunting_boundaries', Array(@area[:boundary_ids]).map(&:to_s))
+        chosen = Array(@area[:selected_creature_names])
+        write_list('targets', chosen) unless chosen.empty?
+        @draft['area'] = @area_name if @area_name
+        note("Applied #{@area_name}: #{rooms.size} rooms, #{Array(@area[:boundary_ids]).size} boundaries. " \
+             'Area suggestions are not field-verified.')
+      end
+
+      # Recompute boundaries for a hand-picked set of rooms, using the same
+      # walker the hunt itself uses. Refuses rather than silently widening.
+      # @param room_ids [Array<Integer>] the rooms to hunt
+      # @param start_room_id [Integer] which one to start in
+      # @return [Boolean] whether to re-render
+      def on_room_geometry(room_ids, start_room_id)
+        result = @app.call('action' => 'room_geometry', 'room_ids' => room_ids,
+                           'start_room_id' => start_room_id)
+        on_change('hunting_room_id', result[:start_room_id])
+        write_list('hunting_boundaries', Array(result[:boundary_ids]).map(&:to_s))
+        note("Recomputed: #{Array(result[:room_ids]).size} rooms, #{Array(result[:boundary_ids]).size} boundaries.")
+      rescue StandardError => error
+        note(error.message, error: true)
+      end
+
+      # @return [Array<Hash>] named injury policies this character can use
+      def injury_policies = Array(@boot[:injury_policies] || @boot['injury_policies'])
+
+      # @return [String, nil] the character-wide injury default
+      def character_injury_policy
+        preferences = @boot[:character_preferences] || @boot['character_preferences'] || {}
+        preferences[:injury_policy] || preferences['injury_policy']
+      end
+
+      # Set the character-wide injury default. Running hunts keep the settings
+      # they captured.
+      # @param name [String, nil] policy name, or nil to clear
+      # @return [Boolean] whether to re-render
+      def on_set_character_injury_policy(name)
+        preferences = @boot[:character_preferences] || @boot['character_preferences'] || {}
+        @app.call('action' => 'set_character_injury_policy', 'name' => name,
+                  'revision' => preferences[:revision] || preferences['revision'])
+        refresh_boot
+        note(name ? "#{name} is this character's injury default." : 'Cleared the character injury default.')
+      rescue StandardError => error
+        note(error.message, error: true)
+      end
+
+      # Override the character default for this hunt only, or clear the
+      # override. An existing custom wounded_eval stays an override until the
+      # player deliberately replaces it.
+      # @param name [String, nil] policy name, or nil to inherit
+      # @return [Boolean] whether to re-render
+      def on_set_hunt_injury_policy(name)
+        if name.to_s.empty?
+          @draft.delete('injury_policy')
+        else
+          @draft['injury_policy'] = name.to_s
+        end
+        @validation = nil
+        @map = nil
+        note(name.to_s.empty? ? 'This hunt uses the character injury default.' : "This hunt uses #{name}.")
+      end
+
+      # Add or remove one creature from the resolution, and re-resolve so the
+      # rooms follow the choice.
+      # @param name [String] creature name
+      # @return [Boolean] whether to re-render
+      def on_choose_creature(name)
+        return note('Resolve an area first.', error: true) unless @area
+
+        chosen = Array(@area[:selected_creature_names]).map(&:to_s)
+        chosen.include?(name.to_s) ? chosen.delete(name.to_s) : chosen << name.to_s
+        on_resolve_area(@area_name, creature_names: chosen, zone: @area[:zone_id],
+                        map_image: @area[:map_image])
+      end
+
+      # Choose a named subarea, where the habitat requires one.
+      # @param zone [String] zone id
+      # @return [Boolean] whether to re-render
+      def on_choose_zone(zone)
+        return note('Resolve an area first.', error: true) unless @area
+
+        on_resolve_area(@area_name, creature_names: Array(@area[:selected_creature_names]),
+                                    zone: zone.to_s.empty? ? nil : zone.to_s,
+                                    map_image: @area[:map_image])
       end
 
       # Entries of a comma-list setting, in order.
@@ -513,6 +719,17 @@ module EO
       end
 
       private
+
+      # A plain-language account of what an area resolution produced,
+      # including what it could not resolve.
+      def area_summary
+        rooms = Array(@area[:room_ids]).size
+        bounds = Array(@area[:boundary_ids]).size
+        parts = ["#{@area_name}: #{rooms} rooms, #{bounds} boundaries"]
+        parts << 'a named subarea is required before rooms can be suggested' if @area[:zone_selection_required]
+        parts << 'incomplete: some rooms or UIDs did not resolve' unless @area[:complete]
+        "#{parts.join('; ')}. Not field-verified."
+      end
 
       def refresh_boot
         @boot = @app.call('action' => 'bootstrap')

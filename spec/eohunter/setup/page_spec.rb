@@ -44,14 +44,19 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
   end
   let(:editor) { EO::HunterSetup::Editor.new(app: app) }
   let(:noop) { ->(*_args) { true } }
+  # Every handler the page can bind, inert. Curried handlers are called with
+  # their bound arguments ahead of the event, so each must accept any arity --
+  # a lambda would raise on the wrong count, and the failure surfaces as
+  # "callback must respond to call" at render time rather than where the
+  # mistake is.
   let(:handlers) do
-    { rename: noop, validate: noop, save: noop, revert: noop, select_page: noop, new: noop,
-      load: ->(_name, _event) { true }, change: ->(_key, _event) { true },
-      set_active: ->(_name, _event) { true }, set_hidden: ->(_name, _hidden, _event) { true },
-      copy_legacy: ->(_name, _event) { true }, request_delete: ->(_name, _event) { true },
-      delete_response: noop, sheet: noop, assign_role: noop, map_click: noop, toggle_map: noop,
-      list_set: ->(_k, _i, _e) { true }, list_add: ->(_k, _e) { true },
-      list_remove: ->(_k, _i, _e) { true }, list_move: ->(_k, _i, _o, _e) { true } }
+    EO::HunterSetup::Page::HANDLERS.to_h do |name, curried|
+      # Arity matters: a curried handler is called with its bound arguments
+      # first, and `proc { |*a| }` cannot be curried at all -- currying one
+      # invokes it immediately and yields the return value, which is not
+      # callable.
+      [name, ->(*args) { args.length == curried + 1 ? true : nil }.curry(curried + 1)]
+    end
   end
 
   def render(session = editor, on: handlers)
@@ -234,6 +239,16 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
 
       expect(key.to_s).to match(Lich::WebUI::Contract::IDENTIFIER), "bad key #{key.inspect}"
     end
+  end
+
+  # The script is the only caller that matters, and a handler it forgets
+  # surfaces at render time as "callback must respond to call" -- a long way
+  # from the omission. Check the script text directly.
+  it 'is given every handler it binds by the launcher script' do
+    script = File.read(File.expand_path('../../../scripts/eohunter-setup.lic', __dir__))
+    handlers = script[/handlers = \{(.*?)^\}/m, 1].to_s
+    supplied = handlers.scan(/^\s{2}([a-z_]+):/).flatten.map(&:to_sym)
+    expect(described_class::HANDLERS.keys - supplied).to be_empty
   end
 
   # The handler contract, pinned because getting it wrong fails silently.

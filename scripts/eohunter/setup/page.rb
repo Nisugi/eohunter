@@ -15,6 +15,47 @@ module EO
     # one by one, so a setting added to the engine appears here without a
     # change to this file.
     module Page
+      # Every event handler the page binds, by name.
+      #
+      # Declared rather than discovered so the script can be checked against
+      # it: a handler the page expects and the caller does not supply fails at
+      # render time, as "callback must respond to call", a long way from the
+      # omission.
+      #
+      # Each is called with its curried arguments first and the event last, so
+      # a handler must accept the arity the call site uses.
+      HANDLERS = {
+        apply_area: 0,
+        assign_role: 0,
+        change: 1,
+        choose_creature: 1,
+        choose_zone: 0,
+        copy_legacy: 1,
+        delete_response: 0,
+        hunt_injury_policy: 0,
+        list_add: 1,
+        list_move: 3,
+        list_remove: 2,
+        list_set: 2,
+        load: 1,
+        map_click: 0,
+        new: 0,
+        rename: 0,
+        request_delete: 1,
+        resolve_area: 0,
+        revert: 0,
+        save: 0,
+        select_page: 0,
+        set_active: 1,
+        set_hidden: 2,
+        sheet: 0,
+        step: 1,
+        step_by: 1,
+        toggle_guided: 0,
+        toggle_map: 0,
+        validate: 0
+      }.freeze
+
       # Field keys longer than this get a textarea instead of a single line.
       LONG_VALUE = 60
       # How many characters of help text to show before it is worth collapsing.
@@ -37,7 +78,11 @@ module EO
         # can reach -- the tabs and every control below sit off-screen with no
         # way to get to them.
         builder.scroll(key: 'content') do
-          Page.body(builder, editor, on: on)
+          if editor.guided?
+            Page.wizard(builder, editor, on: on)
+          else
+            Page.body(builder, editor, on: on)
+          end
         end
       end
 
@@ -55,6 +100,8 @@ module EO
             builder.stack(key: 'actions', slot: '1') do
               builder.button(key: 'validate', label: 'Check settings', on: { activate: on[:validate] })
               builder.button(key: 'save', label: 'Save', on: { activate: on[:save] })
+              builder.button(key: 'guided', label: editor.guided? ? 'Full editor' : 'Guided setup',
+                             on: { activate: on[:toggle_guided] })
               builder.button(key: 'revert', label: 'Revert', disabled: !editor.dirty?,
                              on: { activate: on[:revert] })
             end
@@ -90,6 +137,204 @@ module EO
               end
             end
           end
+        end
+      end
+
+      # The guided path: one question at a time, over the same draft the full
+      # editor edits.
+      #
+      # A step shows only the handful of settings its questions are about --
+      # that restraint is the entire point, against 119 fields in the tabs.
+      def wizard(builder, editor, on:)
+        definition = editor.step_definition
+        builder.text(key: 'eyebrow', emphasis: 'subtle',
+                     content: "STEP #{editor.step_number} OF #{Editor::STEP_IDS.size} - YOUR NEXT HUNT")
+        builder.text(key: 'title', emphasis: 'strong', content: definition[:title].to_s)
+        builder.text(key: 'hint', emphasis: 'subtle', content: definition[:hint].to_s)
+        Page.step_list(builder, editor, on: on)
+        builder.divider(key: 'rule')
+        case definition[:id]
+        when 'character' then Page.step_character(builder, editor, on: on)
+        when 'area' then Page.step_area(builder, editor, on: on)
+        when 'rest' then Page.step_rest(builder, editor, on: on)
+        when 'review' then Page.review(builder, editor)
+        end
+        Page.step_groups(builder, editor, definition, on: on)
+        Page.step_controls(builder, editor, on: on)
+      end
+
+      # Every step, so a player can jump rather than only page through.
+      def step_list(builder, editor, on:)
+        builder.columns(key: 'steps', count: Editor::STEPS.size) do
+          builder.collection(Editor::STEPS.each_with_index.to_a) do |(entry, index), _position|
+            builder.button(key: "s-#{entry[:id]}", slot: index.to_s,
+                           label: "#{index + 1}. #{entry[:title]}",
+                           variant: entry[:id] == editor.step ? 'primary' : 'default',
+                           on: { activate: on[:step].curry[entry[:id]] })
+          end
+        end
+      end
+
+      # The settings this step asks about, under the question each answers.
+      def step_groups(builder, editor, definition, on:)
+        groups = Array(definition[:groups])
+        return if groups.empty?
+
+        builder.collection(groups.each_with_index.to_a) do |((title, keys), index), _position|
+          builder.group(key: "g#{index}", label: title.to_s) do
+            builder.collection(keys) do |key, _i|
+              field = editor.fields.find { |candidate| candidate['key'] == key }
+              next unless field
+
+              Page.field_control(builder, editor, field, on: on)
+            end
+          end
+        end
+      end
+
+      # Back, forward, and the way out to the full editor.
+      def step_controls(builder, editor, on:)
+        builder.divider(key: 'controls-rule')
+        builder.columns(key: 'controls', count: 3, weights: [1, 1, 2]) do
+          builder.button(key: 'back', slot: '0', label: 'Back',
+                         disabled: editor.step_number == 1,
+                         on: { activate: on[:step_by].curry[-1] })
+          builder.button(key: 'next', slot: '1', label: 'Continue',
+                         variant: 'primary',
+                         disabled: editor.step_number == Editor::STEP_IDS.size,
+                         on: { activate: on[:step_by].curry[1] })
+          builder.button(key: 'full', slot: '2', label: 'Leave guided setup',
+                         on: { activate: on[:toggle_guided] })
+        end
+      end
+
+      # Step one asks who is hunting, before any setting.
+      def step_character(builder, editor, on:)
+        context = editor.boot[:context] || editor.boot['context'] || {}
+        who = context[:character] || context['character'] || 'this character'
+        builder.group(key: 'who', label: "A hunt for #{who}") do
+          builder.text_input(key: 'name', label: 'Name this hunt', value: editor.name,
+                             placeholder: 'Untitled hunt', on: { change: on[:rename] })
+          builder.text(key: 'note', emphasis: 'subtle',
+                       content: 'Saving stores a plan. It never starts a hunt, and it never ' \
+                                'changes a hunt already running.')
+        end
+      end
+
+      # Step two: pick a habitat, then the creatures in it, and let the
+      # installed map propose rooms and boundaries.
+      #
+      # Resolving and applying are separate on purpose. A proposal is not
+      # field-verified, so nothing touches the draft until the player accepts
+      # it.
+      def step_area(builder, editor, on:)
+        areas = editor.areas
+        if areas.empty?
+          builder.text(key: 'no-areas', tone: 'caution',
+                       content: editor.area_error ||
+                                'No creature or map data is installed, so areas cannot be suggested. ' \
+                                'Room numbers below still work.')
+          return
+        end
+
+        builder.group(key: 'pick', label: 'Where do you want to hunt?') do
+          options = [{ 'value' => '', 'label' => '(choose an area)' }] +
+                    areas.map { |entry| { 'value' => entry[:name].to_s, 'label' => entry[:name].to_s } }
+          builder.select(key: 'area', label: 'Hunting area', options: options,
+                         value: editor.area_name.to_s, on: { change: on[:resolve_area] })
+          builder.text(key: 'caveat', emphasis: 'subtle',
+                       content: 'Area suggestions come from installed creature and map data. ' \
+                                'They are not field-verified, and they do not prove an area is safe.')
+        end
+        Page.area_proposal(builder, editor, on: on)
+      end
+
+      # What the resolution produced, and the one button that commits it.
+      def area_proposal(builder, editor, on:)
+        area = editor.area
+        return unless area
+
+        builder.group(key: 'proposal', label: 'Proposed hunt') do
+          builder.text(key: 'rooms',
+                       content: "#{Array(area[:room_ids]).size} hunting rooms, " \
+                                "#{Array(area[:boundary_ids]).size} boundaries.")
+          if area[:zone_selection_required]
+            builder.text(key: 'zone-needed', tone: 'caution',
+                         content: 'This area has named subareas. Choose one before its rooms can be suggested.')
+            Page.zone_picker(builder, editor, area, on: on)
+          end
+          Page.creature_picker(builder, editor, area, on: on)
+          Page.area_diagnostics(builder, area)
+          builder.button(key: 'apply', label: 'Use this area', variant: 'primary',
+                         disabled: Array(area[:room_ids]).empty?,
+                         on: { activate: on[:apply_area] })
+          builder.text(key: 'apply-note', emphasis: 'subtle',
+                       content: 'This writes the start room, boundaries and creature list into the draft. ' \
+                                'Nothing is saved until you save.')
+        end
+      end
+
+      def zone_picker(builder, _editor, area, on:)
+        zones = Array(area[:zones])
+        return if zones.empty?
+
+        options = [{ 'value' => '', 'label' => '(choose a subarea)' }] +
+                  zones.map { |zone| { 'value' => zone[:id].to_s, 'label' => (zone[:label] || zone[:id]).to_s } }
+        builder.select(key: 'zone', label: 'Subarea', options: options,
+                       value: area[:zone_id].to_s, on: { change: on[:choose_zone] })
+      end
+
+      # Which creatures to hunt. A checkbox each, because the alternative --
+      # a multi-select -- does not exist in the contract.
+      def creature_picker(builder, _editor, area, on:)
+        creatures = Array(area[:creatures])
+        return if creatures.empty?
+
+        chosen = Array(area[:selected_creature_names]).map(&:to_s)
+        builder.expander(key: 'creatures', label: "Creatures here (#{creatures.size})", open: true) do
+          builder.text(key: 'note', emphasis: 'subtle',
+                       content: 'Choosing none hunts everything otherwise eligible.')
+          builder.collection(creatures) do |creature, index|
+            name = (creature.is_a?(Hash) ? creature[:name] : creature).to_s
+            level = creature.is_a?(Hash) ? creature[:level] : nil
+            builder.checkbox(key: "c#{index}", label: level ? "#{name} (level #{level})" : name,
+                             checked: chosen.include?(name),
+                             on: { change: on[:choose_creature].curry[name] })
+          end
+        end
+      end
+
+      # Everything the resolution could not work out. Said plainly rather than
+      # left for the player to discover in the field.
+      def area_diagnostics(builder, area)
+        notes = Array(area[:diagnostics])
+        notes += ['Some rooms or UIDs did not resolve, so this footprint is incomplete.'] if area[:complete] == false
+        return if notes.empty?
+
+        builder.collection(notes.uniq) do |note, index|
+          builder.text(key: "ad#{index}", tone: 'caution', content: note.to_s)
+        end
+      end
+
+      # Step four leads with the injury rule, which is the thing players most
+      # often want and least often want to write Ruby for.
+      def step_rest(builder, editor, on:)
+        builder.group(key: 'injury', label: 'When should injury send you back?') do
+          policies = editor.injury_policies.map(&:to_s)
+          if policies.empty?
+            builder.text(key: 'none', emphasis: 'subtle',
+                         content: 'No named injury policies exist yet. The engine default applies.')
+            next
+          end
+          character = editor.character_injury_policy
+          options = [{ 'value' => '', 'label' => character ? "Character default (#{character})" : 'Character default' }] +
+                    policies.map { |name| { 'value' => name, 'label' => name } }
+          builder.select(key: 'policy', label: 'Injury policy for this hunt', options: options,
+                         value: (editor.draft['injury_policy'] || '').to_s,
+                         on: { change: on[:hunt_injury_policy] })
+          builder.text(key: 'note', emphasis: 'subtle',
+                       content: 'An existing custom injury rule stays in force until you deliberately ' \
+                                'replace it here.')
         end
       end
 

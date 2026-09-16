@@ -177,6 +177,77 @@ RSpec.describe EO::HunterSetup::Editor do
     end
   end
 
+  describe 'the guided path' do
+    it 'starts in the full editor and enters the wizard at step one' do
+      expect(editor).not_to be_guided
+      editor.on_toggle_guided
+      expect(editor).to be_guided
+      expect(editor.step).to eq(described_class::STEP_IDS.first)
+      expect(editor.step_number).to eq(1)
+    end
+
+    it 'walks forward and back, and stops at both ends' do
+      editor.on_toggle_guided
+      expect(editor.on_step_by(-1)).to be(false)
+      (described_class::STEP_IDS.size - 1).times { editor.on_step_by(1) }
+      expect(editor.step).to eq(described_class::STEP_IDS.last)
+      expect(editor.on_step_by(1)).to be(false)
+    end
+
+    it 'jumps to a named step and refuses one it does not have' do
+      editor.on_toggle_guided
+      expect(editor.on_step('rest')).to be(true)
+      expect(editor.step).to eq('rest')
+      expect(editor.on_step('nonsense')).to be(false)
+      expect(editor.step).to eq('rest')
+    end
+
+    it 'edits the same draft as the full editor, not a separate document' do
+      editor.on_change('hunting_stance', 'offensive')
+      editor.on_toggle_guided
+      expect(editor.settings).to include('hunting_stance' => 'offensive')
+      editor.on_change('flee_count', '3')
+      editor.on_toggle_guided
+      expect(editor).not_to be_guided
+      expect(editor.settings).to include('flee_count' => '3')
+    end
+
+    it 'asks about only a handful of settings per step' do
+      # The point of the wizard: 23 curated fields across five steps, against
+      # 119 in the tabs.
+      described_class::STEPS.each do |step|
+        step[:groups].each do |_title, keys|
+          expect(keys.size).to be <= 4
+          expect(editor.fields.map { |field| field['key'] } & keys).to match_array(keys)
+        end
+      end
+    end
+  end
+
+  describe 'injury policy' do
+    it 'sets and clears a hunt-specific override without touching the character default' do
+      editor.on_set_hunt_injury_policy('Careful')
+      expect(editor.draft['injury_policy']).to eq('Careful')
+      editor.on_set_hunt_injury_policy('')
+      expect(editor.draft).not_to have_key('injury_policy')
+    end
+  end
+
+  describe 'area resolution' do
+    it 'reports rather than raises when there is no creature or map data' do
+      expect(editor.areas).to eq([])
+      editor.on_resolve_area('Nowhere')
+      expect(editor.status_error).to be(true)
+      expect(editor.area).to be_nil
+    end
+
+    it 'refuses to apply an area that was never resolved' do
+      editor.on_apply_area
+      expect(editor.status_error).to be(true)
+      expect(editor.settings).not_to have_key('hunting_room_id')
+    end
+  end
+
   describe 'document management' do
     before do
       editor.on_rename('forest')
