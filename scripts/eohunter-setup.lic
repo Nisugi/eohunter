@@ -40,8 +40,42 @@ handlers = {
   revert: ->(_event) { refresh.call(editor.on_revert) },
   select_page: ->(_event) { false },
   load: ->(name, _event) { refresh.call(editor.on_load(name)) },
-  change: ->(key, event) { refresh.call(editor.on_change(key, event[:value])) }
+  change: ->(key, event) { refresh.call(editor.on_change(key, event[:value])) },
+  new: ->(_event) { refresh.call(editor.on_new) },
+  set_active: ->(name, _event) { refresh.call(editor.on_set_active(name)) },
+  set_hidden: ->(name, hidden, _event) { refresh.call(editor.on_set_hidden(name, hidden)) },
+  copy_legacy: ->(name, _event) { refresh.call(editor.on_copy_legacy(name)) },
+  request_delete: ->(name, _event) { refresh.call(editor.on_request_delete(name)) },
+  # The dialog reports which button closed it; anything but Delete keeps the
+  # document, including a dialog dismissed without a choice.
+  list_set: ->(key, index, event) { refresh.call(editor.on_list_set(key, index, event[:value])) },
+  list_add: ->(key, event) { refresh.call(editor.on_list_add(key, event[:value])) },
+  list_remove: ->(key, index, _event) { refresh.call(editor.on_list_remove(key, index)) },
+  list_move: ->(key, index, offset, _event) { refresh.call(editor.on_list_move(key, index, offset)) },
+  toggle_map: ->(_event) { refresh.call(editor.on_toggle_map) },
+  sheet: ->(event) { refresh.call(editor.on_sheet(event[:value])) },
+  assign_role: ->(event) { refresh.call(editor.on_assign_role(event[:value])) },
+  map_click: ->(event) { refresh.call(editor.on_map_click(event[:region], event[:button])) },
+  delete_response: lambda { |event|
+    changed = event[:button] == 'delete' ? editor.on_confirm_delete : editor.on_cancel_delete
+    refresh.call(changed)
+  }
 }
+
+# The map sheets are read from Lich's own MAP_DIR. register_files needs the
+# directory to sit inside a registered application, script or user root, and
+# script_root is caller-supplied -- so naming MAP_DIR as both the directory and
+# the root is what lets an installed map serve without a Lich change.
+begin
+  if defined?(MAP_DIR) && File.directory?(MAP_DIR.to_s)
+    EO::HunterSetup::Page.map_route =
+      Lich::WebUI.service.register_files('eohunter-maps', MAP_DIR, owner: me, script_root: MAP_DIR)
+  end
+rescue StandardError => error
+  # A map that cannot be served is not a reason to refuse the editor: every
+  # other page still works, and the map says so itself.
+  Lich::Messaging.msg('warn', "eohunter setup: installed maps unavailable (#{error.message})")
+end
 
 page = Lich::API.webui_page(
   owner: me, id: 'eohunter-setup', title: 'EOHunter - Hunt setup',
@@ -57,6 +91,10 @@ page = Lich::API.webui_page(
 starter = Thread.new { Lich::API.webui_start }
 ThreadGroup::Default.add(starter)
 starter.join
+
+# The per-page refresh and dispatcher threads that Lich creates later do belong
+# to this script, and that is right: they serve this page and should stop when
+# it does. Only the shared accept loop must outlive us.
 
 url = Lich::API.webui_launch_url(page: page)
 Lich::Messaging.msg('info', "eohunter setup: #{url}")

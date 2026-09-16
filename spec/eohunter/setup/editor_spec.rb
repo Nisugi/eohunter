@@ -112,6 +112,144 @@ RSpec.describe EO::HunterSetup::Editor do
     expect(editor.profiles).to be_empty
   end
 
+  describe 'list-shaped settings' do
+    # The engine's split/rooms cleaners split a String. Handed an Array they
+    # stringify it, so ["101"] comes back as ["[\"101\"]"] -- a silent
+    # corruption. Everything list-shaped is therefore stored as text.
+    it 'keeps a comma list as text through a save and reload' do
+      editor.on_rename('forest')
+      editor.on_change('hunting_scripts', 'first, second')
+      editor.on_save
+      reloaded = described_class.new(app: app)
+      reloaded.on_load('forest')
+      expect(reloaded.settings['hunting_scripts']).to eq('first, second')
+      expect(EO::Engine::Profile.new(reloaded.settings).settings['hunting_scripts'])
+        .to eq(%w[first second])
+    end
+
+    it 'stores map-assigned boundaries as text the engine reads back as room ids' do
+      editor.on_assign_room('hunting_boundaries', 101)
+      editor.on_assign_room('hunting_boundaries', 202)
+      expect(editor.settings['hunting_boundaries']).to be_a(String)
+      expect(EO::Engine::Profile.new(editor.settings).settings['hunting_boundaries'])
+        .to eq([101, 202])
+    end
+
+    it 'removes a boundary the map clears, and drops the setting when none are left' do
+      editor.on_assign_room('hunting_boundaries', 101)
+      editor.on_assign_room('hunting_boundaries', 101)
+      expect(editor.settings).not_to have_key('hunting_boundaries')
+    end
+  end
+
+  describe 'ordered list editing' do
+    it 'adds, reorders and removes entries, keeping order meaningful' do
+      editor.on_list_add('hunting_scripts', 'first')
+      editor.on_list_add('hunting_scripts', 'second')
+      editor.on_list_add('hunting_scripts', 'third')
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[first second third])
+
+      editor.on_list_move('hunting_scripts', 2, -1)
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[first third second])
+
+      editor.on_list_remove('hunting_scripts', 0)
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[third second])
+    end
+
+    it 'ignores a blank addition and a move off either end' do
+      editor.on_list_add('hunting_scripts', '  ')
+      expect(editor.settings).not_to have_key('hunting_scripts')
+      editor.on_list_add('hunting_scripts', 'only')
+      expect(editor.on_list_move('hunting_scripts', 0, -1)).to be(false)
+      expect(editor.on_list_move('hunting_scripts', 0, 1)).to be(false)
+      expect(editor.list_entries('hunting_scripts')).to eq(['only'])
+    end
+
+    it 'drops an entry that is blanked, and the setting once it is empty' do
+      editor.on_list_add('hunting_scripts', 'one')
+      editor.on_list_set('hunting_scripts', 0, '')
+      expect(editor.settings).not_to have_key('hunting_scripts')
+    end
+
+    it 'reads an existing comma setting as entries' do
+      editor.on_change('hunting_scripts', 'a, b , c')
+      expect(editor.list_entries('hunting_scripts')).to eq(%w[a b c])
+    end
+  end
+
+  describe 'document management' do
+    before do
+      editor.on_rename('forest')
+      editor.on_save
+      editor.on_new
+      editor.on_rename('marsh')
+      editor.on_save
+    end
+
+    it 'sets and clears the hunt an argument-free ;eohunter would start' do
+      editor.on_set_active('forest')
+      expect(editor.active_profile).to eq('forest')
+      expect(editor.status).to match(/did not start/i)
+      editor.on_set_active(nil)
+      expect(editor.active_profile).to be_nil
+    end
+
+    it 'hides and restores a name without touching the profile' do
+      editor.on_set_hidden('marsh', true)
+      expect(editor).to be_hidden('marsh')
+      expect(editor.profiles).to include('marsh')
+      editor.on_set_hidden('marsh', false)
+      expect(editor).not_to be_hidden('marsh')
+    end
+
+    it 'deletes only after confirmation, and clears the draft it was editing' do
+      editor.on_load('marsh')
+      editor.on_request_delete('marsh')
+      expect(editor.pending_delete).to include(name: 'marsh')
+      expect(editor.profiles).to include('marsh')
+      editor.on_confirm_delete
+      expect(editor.profiles).not_to include('marsh')
+      expect(editor.name).to eq('')
+      expect(editor.revision).to be_nil
+    end
+
+    it 'keeps the document when the confirmation is declined' do
+      editor.on_request_delete('marsh')
+      editor.on_cancel_delete
+      expect(editor.pending_delete).to be_nil
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'refuses to delete the default hunt' do
+      editor.on_set_active('marsh')
+      editor.on_request_delete('marsh')
+      editor.on_confirm_delete
+      expect(editor.status_error).to be(true)
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'refuses a delete whose document changed after the confirmation was raised' do
+      editor.on_request_delete('marsh')
+      pending_revision = editor.pending_delete[:revision]
+      other = described_class.new(app: app)
+      other.on_load('marsh')
+      other.on_change('flee_count', '2')
+      other.on_save
+      editor.on_delete('marsh', pending_revision)
+      expect(editor.status_error).to be(true)
+      expect(editor.profiles).to include('marsh')
+    end
+
+    it 'starts a clean draft that writes nothing until saved' do
+      editor.on_load('forest')
+      editor.on_new
+      expect(editor.name).to eq('')
+      expect(editor.settings).to be_empty
+      expect(editor).not_to be_dirty
+      expect(editor.profiles).to contain_exactly('forest', 'marsh')
+    end
+  end
+
   it 'surfaces a validation error rather than raising out of a handler' do
     editor.on_change('flee_count', 'not a number')
     editor.on_validate

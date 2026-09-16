@@ -42,8 +42,13 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
   let(:editor) { EO::HunterSetup::Editor.new(app: app) }
   let(:noop) { ->(*_args) { true } }
   let(:handlers) do
-    { rename: noop, validate: noop, save: noop, revert: noop, select_page: noop,
-      load: ->(_name, _event) { true }, change: ->(_key, _event) { true } }
+    { rename: noop, validate: noop, save: noop, revert: noop, select_page: noop, new: noop,
+      load: ->(_name, _event) { true }, change: ->(_key, _event) { true },
+      set_active: ->(_name, _event) { true }, set_hidden: ->(_name, _hidden, _event) { true },
+      copy_legacy: ->(_name, _event) { true }, request_delete: ->(_name, _event) { true },
+      delete_response: noop, sheet: noop, assign_role: noop, map_click: noop, toggle_map: noop,
+      list_set: ->(_k, _i, _e) { true }, list_add: ->(_k, _e) { true },
+      list_remove: ->(_k, _i, _e) { true }, list_move: ->(_k, _i, _o, _e) { true } }
   end
 
   def render(session = editor, on: handlers)
@@ -93,7 +98,10 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
 
   it 'offers an explicit unset choice, since clearing a setting is meaningful' do
     _page, tree = render
-    select = tree.tree.each.find { |node| node.type == :select }
+    # A settings field's select, not the map's sheet or role pickers -- those
+    # choose what you are looking at, which is never unset.
+    select = tree.tree.each.find { |node| node.type == :select && node.cid.include?('group:f-') }
+    expect(select).not_to be_nil
     expect(select.props[:options].first).to include(value: '', label: '(unset)')
   end
 
@@ -109,6 +117,53 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
     stance = tree.tree.each.select { |node| node.cid.include?('f-hunting_stance') }
     expect(stance.any? { |node| node.props[:content] == 'Unsupported stance.' }).to be(true)
     expect(stance.any? { |node| node.props[:tone] == 'danger' }).to be(true)
+  end
+
+  describe 'with saved hunts' do
+    # The earlier examples render an empty store, where the list rows never
+    # run. These cover the rows themselves.
+    let(:populated) do
+      EO::HunterSetup::Editor.new(app: app).tap do |session|
+        session.on_rename('forest')
+        session.on_save
+        session.on_new
+        session.on_rename('marsh')
+        session.on_save
+        session.on_set_active('forest')
+      end
+    end
+
+    it 'lists each hunt with its actions, and validates' do
+      _page, tree = render(populated)
+      labels = tree.tree.each.select { |node| node.type == :button }.map { |node| node.props[:label] }
+      expect(labels).to include('Edit', 'Set default', 'Hide', 'Delete', 'New hunt')
+    end
+
+    it 'refuses to offer deletion of the default hunt, which the store would reject' do
+      _page, tree = render(populated)
+      active = tree.tree.each.find { |node| node.cid.include?('row-forest') && node.cid.end_with?('button:delete') }
+      other = tree.tree.each.find { |node| node.cid.include?('row-marsh') && node.cid.end_with?('button:delete') }
+      expect(active.props[:disabled]).to be(true)
+      expect(other.props[:disabled]).to be(false)
+    end
+
+    it 'raises a confirmation before deleting, and nothing is deleted by asking' do
+      populated.on_request_delete('marsh')
+      _page, tree = render(populated)
+      dialog = tree.tree.each.find { |node| node.type == :dialog }
+      expect(dialog).not_to be_nil
+      expect(dialog.props[:body]).to include('marsh', 'backup')
+      expect(dialog.props[:buttons].map { |button| button[:id] }).to eq(%w[cancel delete])
+      expect(populated.profiles).to include('marsh')
+    end
+
+    it 'drops the confirmation once it is answered' do
+      populated.on_request_delete('marsh')
+      populated.on_cancel_delete
+      _page, tree = render(populated)
+      expect(tree.tree.each.any? { |node| node.type == :dialog }).to be(false)
+      expect(populated.profiles).to include('marsh')
+    end
   end
 
   it 'still renders when nothing is loaded and no hunts exist' do
