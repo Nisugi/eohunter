@@ -17,6 +17,9 @@ if File.exist?(webui_api)
   # window_presentation and Lich's frontend, and with them fiddle and os,
   # none of which a tree needs to be built and validated.
   require webui_api
+  # Runtime too, for EventContext: the handler-contract examples below need
+  # the real Data class, not a stand-in.
+  require File.join(File.dirname(webui_api), 'runtime.rb')
 else
   RSpec.describe('EO::HunterSetup::Page') do
     it 'renders against the Lich WebUI contract' do
@@ -163,6 +166,30 @@ RSpec.describe EO::HunterSetup::Page, if: File.exist?(webui_api) do
       _page, tree = render(populated)
       expect(tree.tree.each.any? { |node| node.type == :dialog }).to be(false)
       expect(populated.profiles).to include('marsh')
+    end
+  end
+
+  # The handler contract, pinned because getting it wrong fails silently.
+  #
+  # A bound callback is invoked with a Lich::WebUI::Runtime::EventContext --
+  # a Data object -- not a Hash. `event[:value]` raises NoMethodError on it,
+  # the dispatcher catches and logs that, and the control simply does nothing.
+  # Every input in the editor was inert this way.
+  describe 'the event payload handlers receive' do
+    it 'reads values through #payload, since a context is not a Hash' do
+      context = Lich::WebUI::Runtime::EventContext.new(
+        'viewer', nil, nil, :change, { value: 'forest' }, nil
+      )
+      expect { context[:value] }.to raise_error(NoMethodError)
+      expect(context.payload[:value]).to eq('forest')
+    end
+
+    it 'drives the editor from a real context, the way the dispatcher does' do
+      session = EO::HunterSetup::Editor.new(app: app)
+      handler = ->(event) { session.on_rename(event.payload[:value]) }
+      handler.call(Lich::WebUI::Runtime::EventContext.new('viewer', nil, nil, :change,
+                                                          { value: 'forest' }, nil))
+      expect(session.name).to eq('forest')
     end
   end
 
