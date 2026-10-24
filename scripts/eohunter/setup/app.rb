@@ -19,7 +19,9 @@ module EO
       # @param society_abilities [Hash] read-only native ability snapshot
       # @param ready_list [Hash] ReadyList slots and what is readied in them
       # @param inventory [Array<Hash>] carried items as {noun:, name:, types:}
-      def initialize(store:, schema:, geography: nil, context: {}, recovery_fallback: {}, uid_ids: nil, room_lookup: nil, hazards: nil, recovery_resolver: nil, map_images: nil, society_abilities: {}, ready_list: {}, inventory: [], armaments: {})
+      # @param scripts [Array<String>, nil] installed script names, for the
+      #   routine check
+      def initialize(store:, schema:, geography: nil, context: {}, recovery_fallback: {}, uid_ids: nil, room_lookup: nil, hazards: nil, recovery_resolver: nil, map_images: nil, society_abilities: {}, ready_list: {}, inventory: [], armaments: {}, scripts: nil)
         @store = store
         @schema = schema
         @geography = geography
@@ -34,6 +36,7 @@ module EO
         @ready_list = ready_list
         @inventory = inventory
         @armaments = armaments
+        @scripts = scripts
       end
 
       # Execute a whitelisted configuration operation, never a Ruby method name.
@@ -149,6 +152,7 @@ module EO
         checked = checked.transform_keys(&:to_sym)
         missing = Array(checked[:missing]) + missing_map_rooms(checked[:normalized] || {})
         warnings = Array(checked[:warnings])
+        warnings += RoutineCheck.warnings(checked[:normalized] || {}, scripts: @scripts) if kind == 'profiles'
         warnings += result.warnings if result.respond_to?(:warnings)
         advisory = @hazards&.check(result.raw, area: area || data['area'], uid_ids: @uid_ids)
         warnings += Array(advisory['warnings']) if advisory

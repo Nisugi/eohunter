@@ -532,3 +532,26 @@ RSpec.describe EO::Engine::Actions::Assume do
     expect(sent).to eq(['assume wolf'])
   end
 end
+
+RSpec.describe 'EO::Engine::Engage::Routines.handles?' do
+  routines = EO::Engine::Engage::Routines
+
+  # ROUTES is a copy of the case in #run; a word added to one and not the
+  # other would have setup warn of a line the hunt runs, or miss one it skips.
+  it 'lists exactly the shapes #run dispatches on' do
+    source = File.read(File.expand_path('../../scripts/eohunter/routines.rb', __dir__))
+    body = source[/      def run\(engage, world, text, line\)\n.*?\n      end\n/m]
+    literals = body.scan(%r{^\s+when (/.+?/[imx]*)(?= then|$)}).flatten.map { |literal| eval(literal) }
+    expect(body).to match(/^\s+when PREFIX then/)
+    expect(routines::ROUTES).to eq(literals + [routines::PREFIX])
+  end
+
+  it 'answers the shapes it runs, and not the ones it would skip' do
+    expect(routines.handles?('curse hex')).to be true
+    expect(routines.handles?('force smite till 3')).to be true
+    expect(routines.handles?('celerity attack')).to be true
+    expect(routines.handles?('curse sneeze')).to be false
+    expect(routines.handles?('force smite')).to be false
+    expect(routines.handles?('celerity')).to be false
+  end
+end

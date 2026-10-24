@@ -83,6 +83,50 @@ module EO::Engine
 
       module_function
 
+      # The shapes #run answers, in its order, for #handles?. Kept as a
+      # copy rather than shared so the dispatch stays a plain case; the
+      # routines spec fails if the two drift apart.
+      ROUTES = [
+        /^prepare\b/i,
+        /^sacrifice\b/,
+        /^tether( recast)?\b/,
+        /^efury\s?(fire|cold)?/,
+        /^phase\b/,
+        /^curse\s+(clumsy|weakness|darkness|itch|hex|pox|nightmare|star)$/,
+        /^dhurl\s?(.*)?/,
+        /^caststop\s+(\d+)\s?(.*)?/,
+        /^depress\b/,
+        /^(?:unravel|barddispel)\s?(.*)?/,
+        /^resonance\s+([\d\s]+)/,
+        /^stomp\b/,
+        /^leech\b/,
+        /^rapid(?:fire)?\s?(ignore)?/,
+        /^jewel (\w+)/,
+        /^briar\s?(\w+)/,
+        /^assume\s?(\w+)?\s?(\w+)?/,
+        /^throw\b/,
+        /^wield\s+(\w+)\s?(left|right)?/,
+        /^store\s*(left|right|both)?/,
+        /^nudgeweapons?\b/,
+        /^berserk\b/,
+        /^smite\b/,
+        /^unarmed\s+([a-z]*).?([a-z]*)?$/,
+        /^wandolier((?:\s+\w+){0,2})/,
+        /^wand\b/,
+        /^fire\b/,
+        /^dislodge\s?(.*)/,
+        /^force\s+(.*)\s+(?:till|until)\s+(\d+)/i,
+        /^eachtarget\s+(.*)/i,
+        PREFIX
+      ].freeze
+
+      # Whether #run answers a line, without running anything: what setup
+      # asks to warn of a routine line the hunt would skip.
+      #
+      # @param text [String] the routine word and its arguments, lowercased
+      # @return [Boolean]
+      def handles?(text) = ROUTES.any? { |route| route.match?(text) }
+
       # Match the routine word and run its Action with the fight's target,
       # policy and state.
       #

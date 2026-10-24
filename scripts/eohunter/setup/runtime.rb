@@ -8,7 +8,7 @@ module EO
       # Setup's own modules, in dependency order; shared readers load first.
       SETUP_PARTS = %w[
         store composition schema society_abilities area_catalog_data
-        area_catalog area_zones creatures places geography hazards app equipment editor form launch
+        area_catalog area_zones creatures places geography hazards app equipment editor form routine_check launch
       ].freeze
 
       # The engine part list, read out of engine.rb without executing it.
@@ -70,8 +70,10 @@ module EO
       # @return [App] transport-independent editor operations
       # @param level [Integer] the character's level, for the creature finder's
       #   opening range
+      # @param scripts [Array<String>, nil] installed script names, for the
+      #   routine check; nil skips it
       def app(data_dir:, game:, character:, char_settings:, templates:, rooms:, uid_resolver:, level: 0,
-              ready_list: {}, inventory: [], armaments: {})
+              ready_list: {}, inventory: [], armaments: {}, scripts: nil)
         root = File.join(data_dir, game, character)
         store = Store.new(root: File.join(root, 'eohunter'), legacy_root: File.join(root, 'bigshot_profiles'))
         schema = Schema.new(profile_class: EO::Engine::Profile, cleanse_policy_class: EO::Engine::Cleanse::Policy)
@@ -97,7 +99,7 @@ module EO
                 hazards: Hazards.new(profile_class: EO::Engine::Profile),
                 recovery_resolver: recovery_resolver,
                 society_abilities: SocietyAbilities.capture,
-                ready_list: ready_list, inventory: inventory, armaments: armaments)
+                ready_list: ready_list, inventory: inventory, armaments: armaments, scripts: scripts)
       end
     end
   end

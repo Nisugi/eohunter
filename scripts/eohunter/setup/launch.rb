@@ -55,8 +55,19 @@ module EO
           level: (XMLData.level.to_i rescue 0),
           ready_list: ready_list,
           inventory: inventory,
-          armaments: armaments
+          armaments: armaments,
+          scripts: scripts
         )
+      end
+
+      # Installed script names, from where Lich looks for them: the scripts
+      # directory, custom/, and each directory under custom/.
+      def scripts
+        dirs = [SCRIPT_DIR, File.join(SCRIPT_DIR, 'custom')] + Dir.glob(File.join(SCRIPT_DIR, 'custom', '*/'))
+        dirs.flat_map { |dir| Dir.glob(File.join(dir, '*.{lic,rb,cmd,wiz}')) }
+            .map { |path| File.basename(path, '.*') }.uniq
+      rescue StandardError
+        nil
       end
 
       # Lich namespaces this as Lich::Gemstone::CreatureTemplate; testing the
