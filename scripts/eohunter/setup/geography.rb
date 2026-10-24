@@ -95,8 +95,7 @@ module EO
         # union neither habitat name expresses, and is worth offering beside
         # them.
         renames = parents.select do |parent|
-          covered = @catalog.for(parent).flat_map { |entry| Array(entry[:native_habitat_names]) }
-                                        .map(&:to_s).uniq
+          covered = @catalog.for(parent).flat_map { |entry| Array(entry[:native_habitat_names]) }.map(&:to_s).uniq
           covered.size == 1 && habitats.include?(covered.first)
         end
         names = (habitats + (parents - renames)).uniq.sort
@@ -262,8 +261,7 @@ module EO
         raise ArgumentError, 'area must name a habitat' if names.empty?
 
         area = names.first
-        selected = names.flat_map { |name| templates_for(name) }.uniq { |t| t.name.to_s }
-                                                                .sort_by { |t| t.name.to_s }
+        selected = names.flat_map { |name| templates_for(name) }.uniq { |t| t.name.to_s }.sort_by { |t| t.name.to_s }
         zones = names.flat_map { |name| AreaZones.for(name, catalog: @catalog) }.uniq
         raise ArgumentError, "Unknown habitat: #{names.join(', ')}" if selected.empty? && zones.empty?
         chosen = zones.find { |entry| entry[:id] == zone } unless zone.to_s.empty?
