@@ -8,7 +8,7 @@ module EO
       # Setup's own modules, in dependency order; shared readers load first.
       SETUP_PARTS = %w[
         store composition schema society_abilities area_catalog_data
-        area_catalog area_zones creatures places geography hazards app equipment editor
+        area_catalog area_zones creatures places geography hazards app equipment editor form launch
       ].freeze
 
       # The engine part list, read out of engine.rb without executing it.

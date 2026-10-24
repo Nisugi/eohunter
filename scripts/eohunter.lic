@@ -78,6 +78,26 @@
   exit
 end
 
+# The editor, before anything else this script does.
+#
+# Above the guard and the engine load below on purpose. The editor reads the
+# engine's policy classes for their metadata and reuses whatever is already
+# loaded (setup/runtime.rb, load_support) -- it never drops EO::Engine. The
+# engine load below does, so reaching the editor through the ordinary path
+# would deafen a running hunt on the way to opening a window that only wanted
+# to read.
+#
+# It cannot be reached while a hunt runs: Lich refuses a second script of the
+# same name before this file is entered (script.rb:159).
+if script.vars[1].to_s =~ /\A(setup|edit|editor)\z/i
+  # Dropped first, so every edit since the last run takes.
+  ::EO.send(:remove_const, :HunterSetup) if defined?(::EO::HunterSetup)
+  load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'runtime.rb')
+  EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
+  EO::HunterSetup::Launch.run(script_dir: SCRIPT_DIR, context: binding)
+  exit
+end
+
 # Before the load below, which does remove_const on EO::Engine. Ruby
 # resolves constants at call time, so a second instance gives the first
 # one's before_dying a *different* Watch and Events: killing the older
@@ -734,7 +754,25 @@ controlled, options = EO::Engine::Controller::Launch.extract!(options)
 trial, options = EO::Engine::Controller::TrialSequence.extract!(options)
 dry = options.any? { |o| o =~ /^dry$/i }
 if name.empty?
-  EOHunter.msg('error', 'usage: ;eohunter <profile> [dry] [bandits] [track <creature>] [head <count> [lan]|tail [uri]]  or  ;eohunter bounty [<creature>] [head <count>|tail]')
+  EOHunter.msg('error', 'usage: ;eohunter <profile> [dry] [bandits] [track <creature>] [head <count> [lan]|tail [uri]]  or  ;eohunter bounty [<creature>] [head <count>|tail]  or  ;eohunter setup  or  ;eohunter reload')
+  exit
+end
+
+# Forget everything loaded, so the next run reads the files as they are now.
+#
+# Both namespaces are dropped rather than one: the engine reloads itself on
+# every run (engine.rb:29) but setup does not.
+if name =~ /\A(reload|refresh)\z/i
+  dropped = []
+  if defined?(::EO)
+    %i[Engine HunterSetup].each do |part|
+      next unless ::EO.const_defined?(part, false)
+
+      ::EO.send(:remove_const, part)
+      dropped << part
+    end
+  end
+  EOHunter.msg('info', dropped.empty? ? 'nothing was loaded' : "dropped #{dropped.join(' and ')}; the next run reads the files fresh")
   exit
 end
 mode_at = options.index { |o| o =~ /^(head|lead|tail|follow)$/i }
