@@ -88,6 +88,21 @@ RSpec.describe EO::HunterSetup::Editor do
     expect(editor.status).not_to include('Left out')
   end
 
+  # The hunter reads a saved hunt the way eohunter.lic does: Composition
+  # flattens it, and Profile reads what comes out.
+  it 'saves a hunt the hunter reads back with its settings' do
+    editor.on_new
+    editor.on_rename('saved')
+    editor.on_change('flee_count', '4')
+    editor.on_change('hunting_room_id', '29902')
+    editor.on_save
+    path = File.join(@directory, 'GSIV', 'Example', 'eohunter', 'profiles', 'saved.yaml')
+    expect(File).to exist(path)
+    profile = EO::Engine::Profile.new(EO::HunterSetup::Composition.read_profile(path), name: 'saved')
+    expect(profile['flee_count']).to eq(4)
+    expect(profile['hunting_room_id']).to eq(29902)
+  end
+
   it 'refuses to save an unnamed draft rather than writing one' do
     editor.on_change('hunting_stance', 'offensive')
     expect(editor.on_save).to be(true)

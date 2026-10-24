@@ -3,7 +3,7 @@
   bigshot's rules. The engine lives in scripts/eohunter/*.rb (namespace
   EO::Engine); this file wires a bigshot profile to it and runs the loop.
 
-    ;eohunter <profile>                    hunt with data/<game>/<char>/bigshot_profiles/<profile>.yaml
+    ;eohunter <profile>                    hunt with the profile ;eohunter setup saved, else bigshot_profiles/<profile>.yaml
     ;eohunter <profile> dry                load the profile, report the policies, do not run
     ;eohunter <profile> bandits            hunt bandits (also on when the bounty says so)
     ;eohunter <profile> track <creature>   Rangers: TRACK toward the creature before each step
@@ -151,9 +151,12 @@ module EOHunter
     raise ArgumentError, "strict coordination requires libeocoordination #{COORDINATION_LIBRARY_VERSION}: #{e.message}"
   end
 
-  # Where this character's bigshot profile lives.
+  # Where this character's profile lives: the hunt ;eohunter setup saved,
+  # else the Bigshot profile of that name. The same rule as
+  # HunterSetup::Composition.profile_path, which the editor previews with.
   # @param name [String] the profile name
-  # @return [String] data/<game>/<char>/bigshot_profiles/<name>.yaml
+  # @return [String] data/<game>/<char>/eohunter/profiles/<name>.yaml when
+  #   that exists, else data/<game>/<char>/bigshot_profiles/<name>.yaml
   def self.profile_path(name)
     # basename only: the name is the first script argument, and interpolated
     # whole it walked out of the profile directory - `;eohunter ../../foo`
@@ -162,7 +165,9 @@ module EOHunter
     safe = File.basename(name.to_s.tr("\\\\", '/')).sub(/\A[.\s]+/, '')
     raise ArgumentError, "bad profile name: #{name.inspect}" if safe.empty?
 
-    File.join(DATA_DIR, XMLData.game, Char.name, 'bigshot_profiles', "#{safe}.yaml")
+    root = File.join(DATA_DIR, XMLData.game, Char.name)
+    native = File.join(root, 'eohunter', 'profiles', "#{safe}.yaml")
+    File.exist?(native) ? native : File.join(root, 'bigshot_profiles', "#{safe}.yaml")
   end
 
   # Every event worth a line in the front end, and the few that change
@@ -820,12 +825,26 @@ if bounty_mode
   # mind guard) and the bandit-present hold below.
   $bigshot_bandits = EO::Engine::Tracking.bandit_task?(bounty_task) ? true : false
 else
+  # A hunt saved by ;eohunter setup lives in data/<game>/<char>/eohunter/
+  # profiles and wins over a Bigshot profile of the same name. It keeps
+  # its settings under `settings:` and may name shared defaults, combat
+  # plans and an injury policy, so Composition flattens it into what
+  # Profile reads. A Bigshot profile goes through the same path and comes
+  # out unchanged, bar a character injury policy where it has no
+  # wounded_eval of its own.
+  load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'composition.rb')
   path = EOHunter.profile_path(name)
   unless File.exist?(path)
     EOHunter.msg('error', "no profile at #{path}")
     exit
   end
-  profile = EO::Engine::Profile.load(path, uid_ids: ->(uid) { world.uid_ids(uid) })
+  begin
+    raw = EO::HunterSetup::Composition.read_profile(path)
+  rescue ArgumentError, EO::HunterSetup::Store::Error => e
+    EOHunter.msg('error', "#{path}: #{e.message}")
+    exit
+  end
+  profile = EO::Engine::Profile.new(raw, name: File.basename(path, '.yaml'), uid_ids: ->(uid) { world.uid_ids(uid) })
 end
 # The bounty only decides bandit mode in bounty mode. bigshot reaches
 # set_bandit_hunting from inside `if options.any? { |var| var =~ /bounty/i }`
