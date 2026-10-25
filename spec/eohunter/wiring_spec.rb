@@ -2,6 +2,7 @@
 
 require 'ostruct'
 require 'tmpdir'
+require 'fileutils'
 require_relative 'engine_helper'
 require_relative 'support/fake_world'
 
@@ -156,6 +157,18 @@ RSpec.describe 'EOHunter wiring' do
         expect(path).not_to include('..')
         expect(File.dirname(path)).to end_with('bigshot_profiles')
       end
+    end
+
+    it 'prefers the hunt ;eohunter setup saved over the Bigshot profile' do
+      native = File.join(DATA_DIR, 'TEST', 'Testchar', 'eohunter', 'profiles', 'ojandhaart.yaml')
+      FileUtils.mkdir_p(File.dirname(native))
+      File.write(native, "schema_version: 1
+    settings: {}
+    ")
+      expect(wiring.profile_path('ojandhaart')).to eq(native)
+      expect(wiring.profile_path('other')).to end_with('bigshot_profiles/other.yaml')
+    ensure
+      FileUtils.rm_rf(File.join(DATA_DIR, 'TEST'))
     end
 
     it 'refuses a name with nothing left of it' do
