@@ -111,12 +111,15 @@ RSpec.describe 'engage checks from bigshot 5.16' do
     expect(blocked('coupdegrace (!empowered30)')).to be_nil
   end
 
-  it 'vetoes buffN only while the buff is up and expiring, keyed on the command word' do
+  it 'holds buffN while the buff has more than N seconds left, keyed on the command word' do
     expect(blocked('coupdegrace (buff30)')).to be_nil
     buffs << 'Empowered (+20)'
-    expect(blocked('coupdegrace (buff30)')).to eq('buff30')
     me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
+    expect(blocked('coupdegrace (buff30)')).to eq('buff30')
+    me.define_singleton_method(:buff_time_left) { |_n| 0.5 }
     expect(blocked('coupdegrace (buff30)')).to be_nil
+    me.define_singleton_method(:buff_time_left) { |_n| 31 / 60.0 }
+    expect(blocked('coupdegrace (buff30)')).to eq('buff30')
   end
 
   it 'reads the crtrStatus statuses and flags natively, positional ones for prone' do
