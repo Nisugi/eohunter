@@ -147,10 +147,10 @@ are bigshot's vocabulary and belong where they are.
 
 | Move | Lines out of the engine | Where |
 |---|---|---|
-| Adopt #1586 for the watch rules | ~60 | done: watch.rb is the subscription bridge; the engine needs the test package |
+| Adopt #1586 for the watch rules | ~60 | done: watch.rb is the subscription bridge; #1586 shipped in Lich 5.22.0 |
 | Delete the Forge leftovers in world.rb | ~190 | done, 4edaf6c |
 | cleanse helpers to Mana.pulse / settle_rt / Actions::Stand | ~30 | done, 4edaf6c |
-| fput / dothistimeout / waitrt? options PR, then adopt | ~110 | done: lich-5 #1587 open, the ladder is fput's; the engine needs the test package |
+| fput / dothistimeout / waitrt? options PR, then adopt | ~110 | done: the ladder is fput's; lich-5 #1587 shipped in Lich 5.22.0 |
 | Stash: store a hand, put into a named container | ~20 | lich-5 PR (#1579 follow-up), then engine |
 | Effects debuff level, CreatureInstance crtr seen | ~10 | lich-5, low priority |
 

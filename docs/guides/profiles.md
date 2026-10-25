@@ -5,6 +5,11 @@ writes to `data/<game>/<char>/bigshot_profiles/<name>.yaml`. This page
 lists every key the engine honours, how its value is read, its default
 when blank, and which behavior uses it. Keys not listed are ignored.
 
+A hunt saved by `;eohunter setup` holds the same keys under `settings:`
+in `data/<game>/<char>/eohunter/profiles/<name>.yaml`. `;eohunter <name>`
+runs that hunt when it exists, and the Bigshot profile of that name
+when it does not.
+
 Values are cleaned the way bigshot's `clean_value` does. A missing or
 blank value is the default for legacy value types, booleans included.
 The structured `hunting_loadout_sets` and `hunting_loadout_rules` keys are
@@ -18,7 +23,7 @@ YAML null, blank string, or wrong container type is a configuration error.
 | int, float | `to_i` / `to_f` |
 | bool | `true` only for the value `true` or the text "true" |
 | string | as text |
-| stance | lowercased: offensive, advance, forward, neutral, guarded, defensive |
+| stance | lowercased: offensive, advance, forward, neutral, guarded, defensive; any word starting with the first three letters of one; or 0-100 in steps of ten |
 | room | a Lich room id, or `u<uid>` for a game UID resolved through the map (the first matching Lich id) |
 | rooms | a comma-separated list of the above |
 | split | comma-separated list |
@@ -134,7 +139,7 @@ schema, per-spell overrides, safe-departure verification and solo-only scope.
 | `creeping_dread`, `crushing_dread` | int | 0 | Rest: the dread stack at which to rest |
 | `wot_poison` | bool | false | Rest: rest on Wall of Thorns poison |
 | `confusion` | bool | false | Rest: rest when confused |
-| `box_in_hand` | bool | false | Read, not honoured: the engine always rests on a box it could not store |
+| `box_in_hand` | bool | false | Read, not honoured: bigshot uses it to choose a watched loot over a plain wait for the loot script, and the engine always watches |
 | `rest_till_exp` | int | 0 | Rest: mind percent to rest down to |
 | `rest_till_mana`, `rest_till_spirit` | int | 0 | Rest: the value to rest up to |
 | `rest_till_percentstamina` | int | 0 | Rest: stamina percent to rest up to |
@@ -211,8 +216,9 @@ Survival, Cleanse and Flee retain their higher priorities throughout.
 
 Two-site profiles currently refuse coordinated `head`/`tail`, ebounty and LAB
 controller launches: those protocols promise a single shared/handoff refuge.
-Use a separate single-rest profile for those modes. This feature does not add
-a GUI or change the loot/selling scripts.
+Use a separate single-rest profile for those modes. This feature does not
+change the loot/selling scripts. The setup editor edits these keys with
+the rest of the profile.
 
 ### Brief weight spikes
 
@@ -352,8 +358,8 @@ it does not claim that the refuge was reached.
 
 ### Named equipment sets
 
-Configure named sets and ordered rules in the same YAML profile. A graphical
-editor is not part of this feature. Without these keys, the default hunting
+Configure named sets and ordered rules in the same YAML profile. The setup
+editor edits both keys as YAML text on its Equipment page. Without these keys, the default hunting
 hands above continue to work as before.
 
 ```yaml

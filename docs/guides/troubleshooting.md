@@ -54,8 +54,9 @@ with `deader` on. **`stopped: leader_lost` / `member_lost`.** The group
 link went quiet past its deadline. **`stopped: engine_error`.** An
 exception; the message and frames are printed.
 
-**`eohunter: this Lich lacks <constant>`.** The Lich running has none
-of the core PRs the engine needs. Install the test package; see
+**`eohunter: this Lich lacks <constant>; update Lich to 5.22.0 or later`.**
+The Lich running is older than 5.22.0, the first release with the core
+features the engine needs. Update Lich; see
 [Core dependencies](core-dependencies.md).
 
 **`stopped: loadout_stuck`.** The configured item was missing,

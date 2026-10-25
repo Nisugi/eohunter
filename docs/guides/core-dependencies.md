@@ -2,18 +2,20 @@
 
 The engine leans on Lich for everything Lich can do: combat parsing,
 the PSM readers, the spell and effect state, item handling, routing,
-the group, the societies. Some of what it needs is in open lich-5 pull
-requests. This page lists them, what each provides, and how the test
-package fills the gap until they merge.
+the group, the societies. It needs Lich 5.22.0 or later, the first
+release carrying every lich-5 pull request below. This page lists what
+each provided and what in the engine uses it.
 
 ## The check at startup
 
 `eohunter.lic` checks for a few constants before it loads the engine
 (`Lich::Gemstone::Fog`, `Combat::Messages`, `Stance`, `Mana`) and exits
-with a message naming the test package when one is missing. Those are
+with a message to update Lich to 5.22.0 when one is missing. Those are
 the sentinels; the full list below is what the engine actually uses.
 
-## Open lich-5 pull requests
+## lich-5 pull requests the engine consumes
+
+All merged in September 2026 and released in Lich 5.22.0.
 
 | PR | Provides | Used by |
 |---|---|---|
@@ -37,9 +39,9 @@ the sentinels; the full list below is what the engine actually uses.
 
 The last three are not needed for ordinary hunting.
 
-## Already on upstream main
+## Older Lich features
 
-Everything else the engine reads is in Lich 5.20.1: `Lich::Claim`,
+Everything else the engine reads was in Lich before these: `Lich::Claim`,
 `Lich::Gemstone::Status`, `Injured`, `Experience`, `GameObj.targets`
 and `hidden_targets`, `Overwatch`, `Creature` and `CreatureInstance`,
 `Combat::Observers` and `Tracker`, `Group`, `Bounty`, `StowList`,
@@ -48,15 +50,9 @@ and `hidden_targets`, `Overwatch`, `Creature` and `CreatureInstance`,
 (`docs/core-consumption-audit.md`) walks each engine file and names
 what it reads.
 
-## The test package
+## A new core feature
 
-Until the PRs merge, the eohunter test package at
-https://github.com/Nisugi/lich-5/releases is Lich main with all of the
-above merged on a branch (`test/eohunter-package-<n>` on the Nisugi
-fork), plus the script and an effect list. Each release's README says
-which PRs it carries and which Lich version it was built from. Unzip
-over the Lich root; restore the backup to revert.
-
-When a PR merges upstream, the package drops it and the next Lich
-release carries it. When all of them have merged, the package goes
-away and the script runs on stock Lich.
+When the engine needs something Lich does not have, the feature goes to
+lich-5 as a pull request, and the engine waits for the Lich release that
+carries it rather than working around it. Raise the `required:` line in
+`eohunter.lic`'s header and the startup check with it.

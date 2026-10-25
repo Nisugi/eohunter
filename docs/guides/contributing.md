@@ -6,8 +6,8 @@ How changes get in, and the conventions every pull request follows.
 
 - One pull request per fix or feature, against `main`. A PR that
   needs a lich-5 change says so in its description and names the lich
-  PR; it waits until that lands in the test package, and the package
-  README lists it.
+  PR; it waits until a Lich release carries it, and raises the
+  `required:` line in `eohunter.lic` to that release.
 - The engine consumes Lich; it does not fork it. A gap in Lich is a
   lich-5 PR to elanthia-online, from a branch on your fork. Never push
   to the elanthia-online remote directly.
@@ -65,8 +65,8 @@ docstring say what the method does. Then the code.
 ## Local setup
 
 ```
-git clone https://github.com/Nisugi/hunter
-cd hunter
+git clone https://github.com/elanthia-online/eohunter
+cd eohunter
 bundle install
 bundle exec rspec
 bundle exec rubocop
@@ -75,6 +75,6 @@ bundle exec rake doc
 ```
 
 To test in the game, copy `scripts/eohunter.lic` and `scripts/eohunter/`
-into the Lich from the test package, or build and drop the single file
-into `scripts/`. There is no way to run a hunt outside the game; the
+into a Lich 5.22.0 or later, or build and drop the single file into
+`scripts/`; strict group movement also needs `libeocoordination.lic`. There is no way to run a hunt outside the game; the
 specs are the offline check.

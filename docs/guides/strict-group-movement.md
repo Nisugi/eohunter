@@ -16,7 +16,7 @@ Counts, an inferred roster and `lan` are not accepted for strict leaders. A
 strict follower rejects a legacy leader and non-loopback endpoints. Both sides
 need this build and native `Script#with_execution_guard` support; strict
 admission refuses when that capability is missing. Strict mode also loads the
-independently distributed `libeocoordination` library and explicitly installs
+separate `libeocoordination` library and explicitly installs
 its passive parser projection; existing profiles never install it.
 The existing transport assumes cooperating local processes; these checks are
 safety and replay controls, not a sandbox against hostile code running under

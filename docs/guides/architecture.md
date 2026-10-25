@@ -22,6 +22,8 @@ with bigshot line references, are in the engine plan.
 | Loadout | loadout.rb, loadout_selection.rb | optional hand policies and ordered named-set selection; all item movement delegates to Lich::Stash |
 | Group | group.rb | the leader's Hub over DRb, the follower's Member, and the follower behaviors |
 | Controller | controller.rb | opt-in supervision for Lich Agent Bridge; not part of ordinary hunting |
+| Coordination | coordination.rb, coordination_hold.rb | opt-in adapters over the `libeocoordination` library: a read-only projection of group state, and the safe-room hold; loading them starts nothing |
+| Setup | setup/ | the hunt editor `;eohunter setup` opens: a GTK window over a setup core that stores, validates and composes hunts without touching the game |
 
 The behaviors, one file each, are listed below. The script,
 `eohunter.lic`, is the wiring: it loads the engine, reads the profile,
@@ -47,7 +49,7 @@ which room was blocked, when the last attack order went out).
 | 0 | Survival | dead, escape rooms, standing up, pulling a member up, dead players and members |
 | 5 | Cleanse | all of ecleanse: afflictions, hazards, disarm recovery, hive traps; Troubadour's Rally |
 | 10 | Flee | `should_flee?` and the ambusher, one step out per tick |
-| 15 | Muster | the leader's holds between fights |
+| 15 | Muster | the leader's holds between fights (45 under strict group movement) |
 | 20 | Rest / Orders | the rest cycle with every group wait, the final loot, the walk out; a follower runs orders instead |
 | 30 | Loot | each corpse once, the room, the loot script, the fried bookkeeping |
 | 35 | Loadout | restore the configured hunting hands after a temporary owner finishes |

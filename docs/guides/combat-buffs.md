@@ -113,7 +113,8 @@ No distinction between expiry and dispelling is inferred from disappearance.
 - This is missing-effect management, not proactive duration extension.
 - Native player buffs only for `recast`; weapon blessings, aspects, maneuvers,
   scrolls and item use are not new restoration providers in this patch.
-- No new GUI, independent watcher, background command loop or Lich core parser.
+- No independent watcher, background command loop or Lich core parser. The
+  setup editor edits `combat_buffs` as YAML text on its Buffs page.
 - No automatic group support, LAB action authority or changes to existing profiles.
 
 ## Smoke test (player-supervised)
