@@ -67,9 +67,9 @@ RSpec.describe EO::Engine::Engage::Conditions do
     buffs << 'Enh. Dexterity (+10)'
     expect(blocked('barrage (barrage)')).to be_nil
     expect(blocked('barrage (!barrage)')).to eq('!barrage')
-    expect(blocked('barrage (buff30)')).to eq('buff30')
-    me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
     expect(blocked('barrage (buff30)')).to be_nil
+    me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
+    expect(blocked('barrage (buff30)')).to eq('buff30')
     expect(blocked('attack (EB"Enh. Dex")')).to be_nil
     expect(blocked('attack (!EB"Enh. Dex")')).to eq('!EB"Enh. Dex"')
   end

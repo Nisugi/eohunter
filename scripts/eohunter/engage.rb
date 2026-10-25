@@ -242,7 +242,7 @@ module EO::Engine
       # A threshold word: e, essence, h, k, m, mob, s, tier, v or valid,
       # negated with "!", followed by the amount.
       AMOUNT = /^(!?(?:e|essence|h|k|m|mob|s|tier|v|valid))(\d+)$/i
-      # buffN: skip unless the command's buff has under N seconds left.
+      # buffN: skip while the command's buff has more than N seconds left.
       BUFF = /^buff(\d+)$/i
       # repeatdelayN: skip when the line ran under N seconds ago.
       REPEAT = /^repeatdelay(\d+)$/i
@@ -323,15 +323,18 @@ module EO::Engine
           return true if amount_skip?(m[1].downcase, m[2].to_i, world, state, targets_policy)
         end
         if (m = mod.match(BUFF))
-          # 5.16 fix: the buff comes from the command word, and
-          # only a buff that is UP with N seconds left vetoes; time_left is
-          # 0 for an absent buff, which would deadlock a command whose buff
-          # comes from the command (coup de grace -> Empowered).
+          # buffN is "refresh it in the last N seconds": the command runs
+          # when the buff it provides is down or has N seconds or less
+          # left, and is held while more than that remains -- kweed(buff5)
+          # recasts as Tangleweed Vigor runs out, not at 30 seconds.
+          # bigshot 5.16 (3932) vetoes the other way round, inside the
+          # window, which spends the command while the buff is fresh and
+          # holds it as it expires. The buff comes from the command word.
           key = BUFF_OF.keys.find { |k| line.text =~ /^#{Regexp.escape(k)}\b/i }
           buff = key && BUFF_OF[key]
           return false unless buff && me.effect_active?(buff)
 
-          return me.buff_time_left(buff) <= (m[1].to_i / 60.0)
+          return me.buff_time_left(buff) > (m[1].to_i / 60.0)
         end
         if (m = mod.match(EMPOWERED))
           # 5.16 (4336): skip when an Empowered buff of +N or more is up
