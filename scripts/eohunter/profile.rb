@@ -109,6 +109,7 @@ module EO::Engine
         value = cleaner == :structured ? raw.fetch(key, own) : raw[key]
         [key, clean(cleaner, value, own)]
       end
+      @recovery = recovery_overrides(raw['recovery'])
       if !raw['field_rest_room_id'].to_s.strip.empty? && self['field_rest_room_id'].nil?
         raise ArgumentError, 'field rest room could not be resolved through the map'
       end
@@ -133,6 +134,28 @@ module EO::Engine
     # @param key [String, Symbol]
     # @return [Object, nil]
     def [](key) = @settings[key.to_s]
+
+    # The hunt's own Cleanse preferences, from the `recovery` mapping a hunt
+    # saved by ;eohunter setup may carry. Only Cleanse's own keys are kept;
+    # a Bigshot profile has none.
+    #
+    # @return [Hash{Symbol => Object}]
+    attr_reader :recovery
+
+    # Cleanse's policy for this hunt: ecleanse.yaml (else the CharSettings
+    # toggles), then the profile's troubadours_rally, then the hunt's own
+    # `recovery` overrides, which win. A key the hunt leaves out inherits;
+    # an explicit false turns a preference off for this hunt only.
+    # ecleanse.yaml itself is never written.
+    #
+    # @param path [String] the character's ecleanse.yaml
+    # @param char_settings [Hash{String => Object}] the CharSettings fallbacks
+    # @return [Cleanse::Policy]
+    def recovery_policy(path:, char_settings: {})
+      base = Cleanse::Policy.load(path, char_settings: char_settings).to_h
+      base[:troubadours_rally] = self['troubadours_rally']
+      Cleanse::Policy.new(**base.merge(recovery))
+    end
 
     # Refuse unsupported coordination before group registration or game actions.
     # The two-site protocol is opt-in; legacy groups and LAB retain one refuge.
@@ -307,6 +330,16 @@ module EO::Engine
     end
 
     private
+
+    # @param value [Object] the raw `recovery` setting
+    # @return [Hash{Symbol => Object}] Cleanse keys only
+    # @raise [ArgumentError] when it is present but not a mapping
+    def recovery_overrides(value)
+      return {} if value.nil? || value == ''
+      raise ArgumentError, 'recovery must be a mapping of Cleanse preferences' unless value.is_a?(Hash)
+
+      value.to_h { |key, setting| [key.to_sym, setting] }.slice(*Cleanse::KEYS)
+    end
 
     # A prefixed line that would repeat or re-dispatch a preparation. The
     # prefix words come from Routines::PREFIX_WORDS so this guard cannot
