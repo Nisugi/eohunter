@@ -1,4 +1,4 @@
-# eohunter roadmap (2026-09-10)
+# eohunter roadmap (2026-09-10, Lich status updated 2026-10-24)
 
 What is built, what has run in the game, and what is left, in one place.
 hunting-engine-plan.md has the rules and bigshot line references per step;
@@ -12,11 +12,12 @@ working in a real hunt; **gap** means not written yet.
 
 | Milestone | Status | What it is |
 |---|---|---|
-| P1 lich-5 helpers | in review | #1578 Stance, #1579 Stash wield/hands |
-| L1 libeo | done, shrinking | only the Fog stand-in remains; goes away when #1584 merges |
+| P1 lich-5 helpers | done | #1578 Stance, #1579 Stash wield/hands; merged, in Lich 5.22.0 |
+| L1 libeo | done | the Fog stand-in is gone: Fog is Lich's (#1584) |
 | P2 parser seam | not started | widen Combat::Observers; the engine's Watch does the job for now |
 | M0 spike | done, live | hunt-rest-hunt on a real profile |
 | M1 solo parity | built, partly live | the checklist below |
+| Setup editor | built, partly live | `;eohunter setup`: a GTK hunt editor with Bigshot import, validation against the engine, and routine and custom-Ruby checks |
 | L3 libeosettings | not started | Setup scaffold for the e-scripts; independent of eohunter |
 | M3 group | built, not live | head and tail, every follower wait, the looter, orders over DRb |
 | M4 bounty child | built, not live | `;eohunter bounty` in place of `bigshot bounty`; the group verdict and acknowledged shutdown; ebounty stays the driver and gets the group changes |
@@ -35,8 +36,13 @@ working in a real hunt; **gap** means not written yet.
 | #1580 Mana.pulse | mana pulse | Cleanse rally, spell gates |
 | #1581 Bank | silver notes | (ebounty, M4) |
 | #1583 PSM readers | `CMan.command`, `results_regex` | maneuvers.rb |
-| #1584 Fog | `Lich::Gemstone::Fog.return` | Rest's fog phase; libeo stands in until merged |
+| #1584 Fog | `Lich::Gemstone::Fog.return` | Rest's fog phase |
 | #1585 spell refresh | a start message refreshes an active spell | Briar Betrayer timing, every refreshable buff |
+| #1586 Combat::Messages | non-combat message families as observer events | the watch |
+| #1587 bounded fput | `max_resends`, `interrupt`, failure symbols | the send ladder |
+
+All merged in September 2026 and released together in Lich 5.22.0;
+[core-dependencies](guides/core-dependencies.md) has the full list.
 
 Still to open: the scripts-repo effect-list change marking 9105 `span='refreshable'`
 (edited locally only).
@@ -146,19 +152,18 @@ but not loaded. Do not extend it.
 
 The audit is `core-consumption-audit.md`. Status:
 
-- actions.rb's send ladder is fput's (lich-5 #1587, open); settle_rt is
+- actions.rb's send ladder is fput's (lich-5 #1587); settle_rt is
   waitrt? / waitcastrt?
 - world.rb: the Forge leftovers are gone (4edaf6c); what is left delegates
 - cleanse helpers: Mana.pulse, settle_rt, Actions::Stand (4edaf6c)
 - Watch rules: watch.rb subscribes to Combat::Messages, :ucs and :attack
-  (lich-5 #1586, open); the only rule left is the profile's flee text
+  (lich-5 #1586); the only rule left is the profile's flee text
 - the libeo stand-in is gone; Fog is Lich's (#1584)
 - routines.rb: two Stash candidates (store a hand, put into a named
   container) not yet opened
 
-The engine therefore runs only on a Lich with the nine PRs: the eohunter
-test package (github.com/Nisugi/lich-5/releases) until they merge. The
-script refuses to start on a Lich without them and says so.
+The engine therefore needs Lich 5.22.0, the first release with the nine
+PRs. The script refuses to start on an older Lich and says to update.
 
 ## Corpse recovery: a group member dies (gap, designed not built)
 
@@ -262,7 +267,7 @@ comment records why it is deliberately not honoured.
 
 ## Order of work
 
-1. Live runs on the test package: bandit mode, Ranger tracking, the final
+1. Live runs on Lich 5.22.0: bandit mode, Ranger tracking, the final
    loot at rest, fog return, a preempted trip, autosneak, then the
    two-character group run above.
 2. A live bounty through ebounty with eohunter as the child, once ebounty can start it.

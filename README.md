@@ -14,17 +14,22 @@ as one of its behaviors.
 ;eohunter <profile> track <creature>   Rangers: TRACK toward the creature before each step
 ;eohunter <profile> head <count>       lead a group: wait for <count> followers, then hunt
 ;eohunter <profile> head <name> ...    lead a group of these characters
+;eohunter <profile> head <count> lan   ...and serve the rally hub to followers on other machines
 ;eohunter <profile> tail [uri]         follow a leader (the rally whisper names the uri)
-;eohunter bounty [<creature>]          ebounty's hunt child, in place of "bigshot bounty"
+;eohunter bounty [<creature>] [head|tail]   ebounty's hunt child, in place of "bigshot bounty"
+;eohunter setup                        open the hunt editor
+;eohunter reload                       drop what is loaded, so the next run reads the files fresh
 ```
 
-`scripts/eohunter.lic` needs a Lich with the nine open lich-5 pull
-requests it consumes (#1578 Stance, #1579 Stash, #1580 Mana.pulse, #1581
-Bank, #1583 the PSM readers, #1584 Fog, #1585 the spell refresh, #1586
-Combat::Messages, #1587 bounded fput). Until they merge that is the
-eohunter test package at github.com/Nisugi/lich-5/releases: Lich 5.20.1
-with the nine merged, the script, and an effect-list that marks Briar
-Betrayer refreshable. The script refuses to start on a Lich without them.
+eohunter needs Lich 5.22.0 or later: the first release with all nine
+lich-5 pull requests it consumes (#1578 Stance, #1579 Stash, #1580
+Mana.pulse, #1581 Bank, #1583 the PSM readers, #1584 Fog, #1585 the spell
+refresh, #1586 Combat::Messages, #1587 bounded fput). On an older Lich the
+script refuses to start and says to update.
+
+`;eohunter setup` opens a GTK editor for hunts: open one, import a Bigshot
+profile, change its settings, validate it against the installed engine,
+and save it as an eohunter hunt. It never writes to a Bigshot profile.
 Cleanse reads `data/<game>/<char>/ecleanse.yaml`, which ecleanse's own
 setup window writes. A profile's `troubadours_rally`, `signs` entries such as
 `650 panther evoke`, and `quick_commands` (used by bandit mode) all work
@@ -197,7 +202,7 @@ is done, or at once when one stops answering.
 ## API documentation
 
 The engine's YARD docs are published from `main` to
-https://nisugi.github.io/hunter/ by the `docs` workflow. To build them
+https://elanthia-online.github.io/eohunter/ by the `docs` workflow. To build them
 locally:
 
 ```
@@ -221,7 +226,7 @@ line reference.
 - [Extending the engine](docs/guides/extending.md): adding an action, a routine word, a behavior, a World reader
 - [Troubleshooting](docs/guides/troubleshooting.md): the lines, the stops, common causes, what to report
 - [Contributing](docs/guides/contributing.md): the flow, the conventions, review
-- [Core dependencies](docs/guides/core-dependencies.md): the lich-5 PRs, what each provides, the test package
+- [Core dependencies](docs/guides/core-dependencies.md): what the engine uses from Lich, and the lich-5 PRs it came from
 
 ## Building the single-file scripts
 

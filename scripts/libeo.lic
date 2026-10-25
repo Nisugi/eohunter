@@ -9,7 +9,7 @@
     EO.require('0.1.0')
 
   What lives here is script-side glue that Lich itself should not carry: the go2 wrapper
-  and visit, fog return, the help table, and the version gate. Anything that is a game rule
+  and visit, the help table, and the version gate. Anything that is a game rule
   or parser plumbing belongs in Lich itself (Stance, Stash.wield, Bank, Mana.pulse,
   issue_command, Spell state) and is called directly; a script that needs it raises its
   required Lich version. Nothing script-specific goes in either: eloot's Loot / Sell / Hoard, ebounty's

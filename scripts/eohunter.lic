@@ -14,6 +14,8 @@
     ;eohunter <profile> tail [uri]         follow a leader (the rally whisper names the uri)
     ;eohunter bounty [<creature>] [head|tail]   ebounty's hunt child, as "bigshot bounty": the profile
                                            ebounty put in UserVars.op, its bounty_eval, exit at rest
+    ;eohunter setup                        open the hunt editor (GTK)
+    ;eohunter reload                       drop what is loaded, so the next run reads the files fresh
 
   Behaviors by priority: Survival 0, Cleanse 5 (ecleanse folded in; its
   settings from ecleanse.yaml), Flee 10, Muster 15 (the leader's holds),
@@ -25,7 +27,7 @@
   contributors: Nisugi
           game: Gemstone
           tags: hunting, combat, eo
-      required: Lich >= 5.20.1
+      required: Lich >= 5.22.0
        version: 0.5.1
 
   Version Control:
@@ -69,12 +71,12 @@
 
 # The engine consumes lich-5 #1578-#1587 (Stance, Stash, Mana.pulse, Bank,
 # the PSM readers, Fog, the spell refresh, Combat::Messages, bounded
-# fput): a Lich without them is the eohunter test package's job, not a
-# stand-in's.
+# fput), first released together in Lich 5.22.0. A Lich without them is
+# told to update rather than given a stand-in.
 %w[Lich::Gemstone::Fog Lich::Gemstone::Combat::Messages Lich::Gemstone::Stance Lich::Gemstone::Mana].each do |const|
   next if Object.const_defined?(const)
 
-  Lich::Messaging.msg('error', "eohunter: this Lich lacks #{const}; install the eohunter test package (github.com/Nisugi/lich-5/releases)")
+  Lich::Messaging.msg('error', "eohunter: this Lich lacks #{const}; update Lich to 5.22.0 or later")
   exit
 end
 

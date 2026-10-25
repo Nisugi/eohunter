@@ -1,7 +1,8 @@
 # Named equipment sets and safe combat handoffs
 
-Status: implemented and independently reviewed, extending loadout PR #74. GUI work is
-explicitly deferred; profiles remain YAML. No live character testing or
+Status: implemented and independently reviewed, extending loadout PR #74. Profiles remain
+YAML; the setup editor (`;eohunter setup`) later added editing these keys as
+YAML text. No live character testing or
 deployment is authorized by this implementation step.
 
 ## Contract

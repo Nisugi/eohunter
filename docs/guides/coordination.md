@@ -4,8 +4,9 @@
 report and movement predicate through an explicitly supplied `EO::Coordination`
 session. Loading the engine does not create a session, listener, observer, or
 adapter. No profile key or command-line mode enables it. This is programmatic
-pilot wiring for the independently distributed
-[`libeocoordination` library](https://github.com/elanthia-online/eohunter/pull/115).
+pilot wiring for the separate `libeocoordination` library
+(`scripts/libeocoordination.lic`, built from this repository; see
+[the coordination library](coordination-library.md)).
 The library supplies session identity, publication and bounded loopback reads;
 the adapter owns only the existing Hunter policy projection.
 
@@ -117,9 +118,8 @@ live-game acceptance or movement migration is claimed by this adapter.
 The optional `spec/eohunter/coordination_integration_spec.rb` uses the actual
 paired `EO::Coordination::Session`, library loopback transport and `Client`,
 with the real engine callback and `Group.report` over a fake World. Run it by
-setting `EO_COORDINATION_ROOT` to the `scripts` directory of the #115 checkout
+setting `EO_COORDINATION_ROOT` to this repository's `scripts` directory
 when invoking RSpec. It
 checks that unknown observations survive transport, pings cannot freshen a
 stopped owner, and reconnect fences prior readers. Without that environment
-variable the cross-repository examples are pending; ordinary Hunter specs do
-not depend on a second checkout.
+variable those examples are pending; ordinary Hunter specs do not need it.

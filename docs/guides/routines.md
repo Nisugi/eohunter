@@ -42,7 +42,8 @@ cast. A spell line first goes through the spell gates: known, not on
 cooldown, affordable, the out-of-mana rule. An unaffordable spell waves
 a wand when `wand_if_oom` is on, wracks when `use_wracking` is on, and
 otherwise fails the line and, when the `oom` rule says so, asks for a
-rest. Self spells 506, 902 and 411 cast without a target.
+rest. A self spell (bigshot's self-cast list: 506, 902, 411 and about a
+hundred more) is cast at the character, not the target.
 
 `allycast 1109 Skooshii` casts on a named player who is present and in
 our group; a missing ally skips the line. With `(afterattack)` the line
@@ -130,7 +131,7 @@ Anything else is sent as a plain command and its answer returned.
 ## Modifiers
 
 A modifier in the parenthesis is one of the forms below. A leading `!`
-inverts it. Unknown words are reported once and ignored.
+inverts it. An unknown word never skips the line.
 
 ### Amounts
 
@@ -147,7 +148,7 @@ inverts it. Unknown words are reported once and ignored.
 | `mob` | creatures present (skip when fewer than N) |
 | `valid` | valid targets present (skip when fewer than N) |
 | `tier` | the unarmed tier (skip when below N) |
-| `k` | kneeling (no number) |
+| `k` | we are not kneeling; it takes a number, which is not read (`k1`), and a bare `k` does nothing |
 
 With `!` the comparison flips: `!m40` skips when mana is 40 or more.
 
@@ -155,7 +156,7 @@ With `!` the comparison flips: `!m40` skips when mana is 40 or more.
 
 | Form | Skips when |
 |---|---|
-| `buff5` | the command's own buff is up with more than 5 minutes left (barrage, bearhug, coupdegrace, flurry, fury, garrote, kweed, pummel, shout, thrash, weed, yowlp) |
+| `buff5` | the command's own buff is up with more than 5 seconds left, so the line refreshes it in its last 5 seconds or when it is down (barrage, bearhug, coupdegrace, flurry, fury, garrote, kweed, pummel, shout, thrash, weed, yowlp) |
 | `empowered20` | an Empowered buff of +20 or more is up |
 | `thp50` | the target's health percent is above 50 |
 | `repeatdelay30` | the same line ran within the last 30 seconds |
@@ -169,9 +170,9 @@ With `!` the comparison flips: `!m40` skips when mana is 40 or more.
 
 | Word | Skips when |
 |---|---|
-| `burst`, `surge` | the Enhancive buff is up (with `!`, when the cooldown is active) |
+| `burst`, `surge` | the Enhancive buff (Dexterity, Strength) is not up (with `!`, when the cooldown is active) |
 | `bearhug` | an Enh. Strength buff is not up |
-| `voidweaver` | no Voidweaver buff |
+| `voidweaver` | the Voidweaver buff is up |
 | `disease`, `poison`, `hidden` | we are not diseased, poisoned, hidden |
 | `outside` | the room is not outside |
 | `splashy` | the room is tagged splashy |
@@ -188,9 +189,9 @@ Read from Lich's CreatureInstance, never from the status string:
 
 | Word | Skips when |
 |---|---|
-| `prone` | the target is not down (sleeping, webbed, stunned, kneeling, sitting, prone, immobilized) |
-| `frozen` | the target is not immobilized |
-| `rooted` | the target is not rooted |
+| `prone` | the target is down (sleeping, webbed, stunned, kneeling, sitting, prone, immobilized) |
+| `frozen` | the target is immobilized |
+| `rooted` | the target is rooted |
 | `flying` | the target is not flying |
 | `calm`, `disoriented`, `hovering`, `immobilized`, `kneeling`, `sitting`, `sleeping`, `stunned`, `webbed` | the target does not have that status |
 | `ascended`, `ascension_boss`, `challenging`, `disengaged`, `inferior`, `mini_boss`, `mount`, `rider`, `sympathetic` | the target does not carry that flag |
@@ -200,8 +201,10 @@ Read from Lich's CreatureInstance, never from the status string:
 | `fatalcrit`, `smote` | the target has not taken one |
 | `ucsdecent`, `ucsgood`, `ucsexcellent`, `ucstierup` | unarmed position words |
 
-With `!` each of these means the opposite: `!prone` skips when the
-target is down.
+With `!` each of these means the opposite: `!flying` skips when the
+target is flying, and `!prone` when it is not down. `prone`, `frozen` and
+`rooted` skip on the state, as bigshot's do, where the other words skip
+without it.
 
 ## What a line returns
 

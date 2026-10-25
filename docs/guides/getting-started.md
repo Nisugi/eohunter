@@ -5,30 +5,46 @@ you from nothing to a dry run and then a first hunt.
 
 ## What you need
 
-- Lich 5.20.1 or 5.21.0 with the open lich-5 pull requests the engine
-  consumes. Until they merge upstream, that is the eohunter test package
-  at https://github.com/Nisugi/lich-5/releases: the lib files with the
-  PRs applied, the script, and an effect list. See
-  [Core dependencies](core-dependencies.md) for what each PR provides.
-  The script checks for the constants it needs at startup and refuses
-  to start without them, naming the package.
-- A bigshot profile at `data/<game>/<char>/bigshot_profiles/<name>.yaml`,
-  written by bsprofiles or by hand. eohunter reads it unchanged; see
-  [Profiles](profiles.md) for every key it honours.
+- Lich 5.22.0 or later. See [Core dependencies](core-dependencies.md)
+  for what the engine uses from it. The script checks for the constants
+  it needs at startup and refuses to start on an older Lich, saying to
+  update.
+- A profile: a bigshot profile at
+  `data/<game>/<char>/bigshot_profiles/<name>.yaml`, written by bsprofiles
+  or by hand, which eohunter reads unchanged; or a hunt made with
+  `;eohunter setup` (below). See [Profiles](profiles.md) for every key it
+  honours.
 - For Cleanse, an `ecleanse.yaml` in the same character directory,
   written by ecleanse's setup window. Without one, Cleanse runs with
   every toggle off.
 
 ## Installing
 
-From the test package: close Lich, back up `lib/`, `scripts/eohunter*`
-and `data/effect-list.xml`, unzip the archive over the Lich root, start
-Lich. The package README has the revert steps.
+From a build: the repo builds one `eohunter.lic` with the engine inlined,
+and `libeocoordination.lic` (see the README section on building). Drop
+`eohunter.lic` into `scripts/`; add `libeocoordination.lic` beside it for
+strict group movement, which loads it. If a `scripts/eohunter/` directory
+from an earlier install is beside it, remove that directory; the built
+file does not read it. The built file has no setup editor: that runs from
+the `scripts/eohunter/` parts.
 
-From a build: the repo builds one `eohunter.lic` with the engine inlined
-(see the README section on building). Drop it into `scripts/`. If a
-`scripts/eohunter/` directory from an earlier install is beside it,
-remove that directory; the built file does not read it.
+From the parts: copy `scripts/eohunter.lic`, `scripts/eohunter/`,
+`scripts/libeocoordination.lic` and `scripts/eocoordination/` into Lich's
+`scripts/`.
+
+## Making a hunt with the editor
+
+```
+;eohunter setup
+```
+
+opens a window for hunts. Pick a Bigshot profile and Import it to start
+from one you have, or New for an empty hunt. Change settings page by
+page, then Validate: it checks the hunt against the installed engine and
+lists errors and warnings under the settings they belong to and on the
+Review page. Save writes the hunt to
+`data/<game>/<char>/eohunter/profiles/<name>.yaml`; the Bigshot profile
+is never written.
 
 ## The first run
 
@@ -74,7 +90,9 @@ whether the profile says what you meant.
 | `;eohunter <profile> head <name> ...` | lead a group of those characters |
 | `;eohunter <profile> head <count> lan` | the same, with the rally hub served to the network rather than to this machine only |
 | `;eohunter <profile> tail [uri]` | follow a leader; the rally whisper names the uri |
-| `;eohunter bounty [<creature>]` | ebounty's hunt child, in place of `bigshot bounty` |
+| `;eohunter bounty [<creature>] [head|tail]` | ebounty's hunt child, in place of `bigshot bounty`, alone or in a group |
+| `;eohunter setup` | open the hunt editor |
+| `;eohunter reload` | drop what is loaded, so the next run reads the files fresh |
 
 Group hunting is described in the README. The leader serves its rally
 hub on the loopback address, so leader and followers share a machine by

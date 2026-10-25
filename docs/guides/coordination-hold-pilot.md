@@ -1,18 +1,16 @@
 # Coordination hold/release pilot
 
-This draft adapter consumes the independently distributed
-[`libeocoordination` library](https://github.com/elanthia-online/eohunter/pull/115).
-It shares [#110](https://github.com/elanthia-online/eohunter/pull/110)'s completed-
-tick hook, but does not require its read-only adapter. Whichever lands second
-must reconcile that shared hook. The local policy and library contract match
-the hold adapter in [#114](https://github.com/elanthia-online/eohunter/pull/114);
-that broader group-transport integration remains a separate proposal.
+This adapter consumes the separate `libeocoordination` library
+(`scripts/libeocoordination.lic`, built from this repository; see
+[the coordination library](coordination-library.md)).
+It shares the read-only [coordination pilot](coordination.md)'s
+completed-tick hook, but does not require its adapter.
 
 The library owns bounded transport, pair identity, tickets, replay protection,
 capacity and receipts. EOHunter owns safe-room eligibility and local pause/resume
-policy. This draft depends on a compatible library release (API 0.1.0); it does
-not depend on the closed Lich core coordination proposal. The library's runtime
-integration requirements are documented with #115.
+policy. It needs library API 0.1.0; it does not depend on the closed Lich core
+coordination proposal. The library's runtime integration requirements are in
+[the coordination library](coordination-library.md).
 
 ## Scope and explicit setup
 
@@ -85,7 +83,7 @@ facts. Native Script still owns script lifetime and shutdown.
 
 ## Offline verification
 
-Point `EO_COORDINATION_ROOT` at the `scripts` directory of the #115 checkout:
+Point `EO_COORDINATION_ROOT` at this repository's `scripts` directory:
 
 ```sh
 EO_COORDINATION_ROOT=/path/to/eohunter/scripts bundle exec rspec

@@ -10,7 +10,7 @@ every addition follows. Read [Architecture](architecture.md) first.
    no copies of core tables, no second implementation of something
    Lich does. The core consumption audit says where the line is. A
    missing core feature is a lich-5 pull request, and the engine waits
-   for it behind a test package rather than working around it.
+   for the Lich release that carries it rather than working around it.
 2. **Read through World.** Behaviors and actions never touch XMLData,
    GameObj or the other globals. Add a reader on World, with a source
    accessor if it is a new Lich object, and stub it in the spec.
@@ -154,11 +154,12 @@ constant into a silent default; two of those hid real bugs for a while.
 ```
 bundle exec rspec                  # the suite, about a second
 bundle exec rubocop                # Layout and Lint, ASCII-only source
-bundle exec rake build             # dist/eohunter.lic
+bundle exec rake build             # dist/eohunter.lic and dist/libeocoordination.lic
 bundle exec rake doc               # the YARD site into doc/
 ```
 
 To try a change in the game, copy `scripts/eohunter.lic` and
 `scripts/eohunter/` into a Lich that has the core dependencies, or
-build and drop the single file in. `;eohunter <profile> dry` loads
+build and drop the single file in (strict group movement and the hold
+adapter also load `libeocoordination.lic`). `;eohunter <profile> dry` loads
 everything without sending a command.

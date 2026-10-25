@@ -77,8 +77,8 @@ already has the half-finished version of each:
   Patterns thin.
 
 What stays script-side: silver and bank notes, fog return, escort, the go2 wrapper (they encode
-town knowledge or depend on other scripts); the Gtk settings scaffold (Gtk is the layer the
-WebUI branch is replacing, so it must stay swappable without a Lich release); and the engine
+town knowledge or depend on other scripts); the Gtk settings scaffold (it must stay swappable
+without a Lich release); and the engine
 itself (opinionated, and a Lich release per engine change would slow eohunter by months; if it
 proves itself for a year and a second script wants it, that's when it earns a place in lib).
 
@@ -275,7 +275,8 @@ None of this is required for eohunter to ship; it's what the library makes possi
 Done straight through; each has an acceptance check, used as a checkpoint when wanted.
 
 **P1, lich-5 helpers PR (two or three days, review latency on top).** Stance module and the Stash additions (find_item, wield, hands). Opened 2026-09-09 as
-lich-5 #1578 (Stance) and #1579 (Stash.wield / hands), specs green.
+lich-5 #1578 (Stance) and #1579 (Stash.wield / hands), specs green. Both merged
+2026-09-13 and shipped in Lich 5.22.0.
 Acceptance: eloot and eherbs each run one real session with `get_command`, `wait_rt`, and
 `change_stance` replaced by `issue_command`, `waitrt?`, and `Stance.change`, no behaviour change.
 
@@ -868,7 +869,8 @@ we are, not counted as an attempt. `Travel.claim`/`release` keep one go2 at a ti
 starting go2 suspends any other trip still underway.
 
 **Off libeo (2026-09-10).** The fog for methods 1-5 is `Lich::Gemstone::Fog` (lich-5 #1584),
-with libeo's `EO::Fog` loaded only on a Lich without it; method 6, the profile's `custom_fog`
+with libeo's `EO::Fog` loaded only on a Lich without it (that stand-in has since
+been removed; Lich 5.22.0 carries Fog); method 6, the profile's `custom_fog`
 commands, is Rest's own `:custom_fog` phase, one line per tick, confirmed on the server uid
 changing. The hurl recovery no longer travels: the throw and the recovery are one action in
 one room, and a weapon elsewhere is a disarm for Cleanse. Nothing else in the engine calls
@@ -1177,7 +1179,7 @@ own ebounty for the town phases is ebounty's change, not the engine's.
 
 ## Core only (2026-09-10)
 
-With the nine lich-5 PRs in the runtime (the eohunter test package), the
+With the nine lich-5 PRs in the runtime (released in Lich 5.22.0), the
 engine dropped its three remaining copies of core, per the core consumption
 audit (`core-consumption-audit.md`):
 
