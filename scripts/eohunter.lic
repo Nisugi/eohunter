@@ -365,9 +365,8 @@ module EOHunter
     # Rest drives Loot for the final loot before leaving (should_rest? 9041)
     rest = E::Behaviors::Rest.new(policy: rest_policy, counters: counters, loot: loot, group: leader,
                                   scripts: scripts, travel: travel, buffs: buffs)
-    cleanse_policy = E::Cleanse::Policy.load(File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
-    # bigshot's Troubadour's Rally toggle: 1040 on ourselves and the group
-    cleanse_policy.troubadours_rally = profile['troubadours_rally']
+    cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'),
+                                             char_settings: CharSettings.to_hash)
     cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { rest.resting? })
     flee_policy = profile.flee_policy
@@ -523,8 +522,8 @@ module EOHunter
                                       sneaky: wander_policy.sneaky, scripts: scripts, travel: travel)
     loadout = E::Behaviors::Loadout.new(policy: profile.loadout_policy, selection: profile.loadout_selection,
                                         owner: assist, resting: -> { orders.resting? })
-    cleanse_policy = E::Cleanse::Policy.load(File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
-    cleanse_policy.troubadours_rally = profile['troubadours_rally']
+    cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'),
+                                             char_settings: CharSettings.to_hash)
     cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { orders.resting? }, follower: true)
     flee = E::Behaviors::Flee.new(policy: profile.flee_policy, targets_policy: targets_policy, walker: walker,

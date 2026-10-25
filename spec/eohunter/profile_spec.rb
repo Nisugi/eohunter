@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'ostruct'
+require 'tmpdir'
+require 'yaml'
 require_relative 'engine_helper'
 
 RSpec.describe EO::Engine::Profile do
@@ -148,5 +150,47 @@ RSpec.describe EO::Engine::Profile do
     it 'still compiles a good one' do
       expect(described_class.new({ 'flee_message' => 'run away' })['flee_message']).to eq(/run away/i)
     end
+  end
+end
+
+RSpec.describe EO::Engine::Profile, '#recovery_policy' do
+  around do |example|
+    Dir.mktmpdir('hunter-recovery') do |directory|
+      @ecleanse = File.join(directory, 'ecleanse.yaml')
+      File.write(@ecleanse, { 'cleanse_poison' => true, 'cleanse_disease' => true, 'safe_room' => '228' }.to_yaml)
+      example.run
+    end
+  end
+
+  it 'is ecleanse.yaml and troubadours_rally when the hunt says nothing' do
+    policy = described_class.new({ 'troubadours_rally' => true }).recovery_policy(path: @ecleanse)
+    expect(policy.cleanse_poison).to be(true)
+    expect(policy.safe_room).to eq('228')
+    expect(policy.troubadours_rally).to be(true)
+  end
+
+  it 'lays the hunt\'s own overrides over ecleanse.yaml, an explicit false included' do
+    profile = described_class.new({ 'recovery' => { 'cleanse_poison' => false, 'dispel_magic' => true } })
+    policy = profile.recovery_policy(path: @ecleanse)
+    expect(policy.cleanse_poison).to be(false)
+    expect(policy.dispel_magic).to be(true)
+    expect(policy.cleanse_disease).to be(true)
+  end
+
+  it 'lets the hunt override troubadours_rally too' do
+    profile = described_class.new({ 'troubadours_rally' => true, 'recovery' => { 'troubadours_rally' => false } })
+    expect(profile.recovery_policy(path: @ecleanse).troubadours_rally).to be(false)
+  end
+
+  it 'keeps only Cleanse keys, and refuses a recovery that is not a mapping' do
+    expect(described_class.new({ 'recovery' => { 'cleanse_poison' => false, 'nonsense' => 1 } }).recovery)
+      .to eq(cleanse_poison: false)
+    expect { described_class.new({ 'recovery' => 'yes' }) }.to raise_error(ArgumentError, /recovery/)
+  end
+
+  it 'falls back to the CharSettings toggles without an ecleanse.yaml' do
+    policy = described_class.new({}).recovery_policy(path: File.join(Dir.tmpdir, 'absent-ecleanse.yaml'),
+                                                     char_settings: { 'cleanse_poison' => true })
+    expect(policy.cleanse_poison).to be(true)
   end
 end
