@@ -1,8 +1,9 @@
 name: release
 
-# A tag like v0.5.1 builds the single-file eohunter.lic and attaches it
-# (with its line map) to a GitHub release of the same name. Distribution
-# from there, to the scripts repo or a jinx manifest, is a separate step.
+# A tag like v0.5.1 builds the single-file eohunter.lic and the eohunter
+# gem and attaches them (with the line maps) to a GitHub release of the
+# same name. Players install the gem from the release file; it is not
+# pushed to rubygems.org.
 on:
   push:
     tags:
@@ -24,6 +25,7 @@ jobs:
       - run: bundle exec rake build
       - run: ruby -c dist/eohunter.lic
       - run: ruby -c dist/libeocoordination.lic
+      - run: bundle exec rake gem
       - name: Check the tag matches the engine version
         run: |
           version=$(ruby -e "puts File.read('scripts/eohunter/engine.rb')[/VERSION = '([^']+)'/, 1]")
@@ -35,4 +37,5 @@ jobs:
             dist/eohunter.lic.map
             dist/libeocoordination.lic
             dist/libeocoordination.lic.map
+            dist/eohunter-*.gem
           generate_release_notes: true
