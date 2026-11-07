@@ -289,6 +289,9 @@ module EO::Engine
       # @param world [World]
       # @return [Boolean]
       def wants_control?(world)
+        # Alive again (on_death :depart/:quit keeps the engine running):
+        # the next death is announced and acted on afresh.
+        @announced_dead = @death_sent = false unless world.me.dead?
         @reason = EO::Engine::Survival::Predicates.reason(world, @policy, resting: @resting.call, follower: @follower)
         !@reason.nil?
       end

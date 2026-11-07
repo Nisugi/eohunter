@@ -152,6 +152,28 @@ RSpec.describe EO::Engine::Behaviors::Survival do
     expect(sent).to eq(%w[depart depart] + ['depart confirm', 'depart confirm'])
   end
 
+  # on_death :depart keeps the engine running after the depart; the flags
+  # never reset, so a second death emitted no :died and sent no DEPART.
+  it 'announces and departs again after coming back alive and dying again' do
+    policy.on_death = :depart
+    deaths = []
+    EO::Engine::Events.on(:died) { |e| deaths << e.data[:on_death] }
+    sent = []
+    allow(EO::Engine::Actions::Depart).to(receive(:new).and_wrap_original { |m, *a, **k| m.call(*a, **k).tap(&scripted(sent)) })
+
+    me[:dead?] = true
+    survival.wants_control?(world)
+    expect(survival.tick(world).reason).to eq(:departed)
+    me[:dead?] = false
+    expect(survival.wants_control?(world)).to be false
+    me[:dead?] = true
+    survival.wants_control?(world)
+    expect(survival.tick(world).reason).to eq(:departed)
+
+    expect(deaths).to eq(%i[depart depart])
+    expect(sent).to eq((%w[depart depart] + ['depart confirm', 'depart confirm']) * 2)
+  end
+
   it 'quits once, the same way' do
     policy.on_death = :quit
     me[:dead?] = true
