@@ -401,6 +401,18 @@ RSpec.describe EO::Engine::Behaviors::Flee do
     expect(flee.wants_control?(world)).to be false
   end
 
+  # The latch was cleared only by "You bolt" and by Flee's own step; a
+  # room change by anyone else (go2, follow, the player) carried it into
+  # the new room, where Predicates.reason answered :message first.
+  it 'drops the flee message latch when the room changes by other means' do
+    flee
+    EO::Engine::Events.emit(:flee_message, raw: 'x')
+    expect(flee.wants_control?(world)).to be true
+    expect(flee.reason).to eq(:message)
+    room.id = 2
+    expect(flee.wants_control?(world)).to be false
+  end
+
   it 'does not seize movement from a supervised go2 trip in a hazardous transit room' do
     policy.clouds = true
     scripts = Class.new do

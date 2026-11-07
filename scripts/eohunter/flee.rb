@@ -580,6 +580,10 @@ module EO::Engine
         id = world.room.id
         return if id == @entered_room
 
+        # The latch is the room's: a room change by anyone (go2, follow,
+        # the player) leaves the flee message behind with it. The first
+        # look is not a change; a message seen before it still counts.
+        @latched = false unless @entered_room.nil?
         @entered_room = id
         @just_entered = true
         @stanced = false
