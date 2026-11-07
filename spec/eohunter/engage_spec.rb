@@ -5,6 +5,19 @@ require_relative 'engine_helper'
 
 EngageNpc = Struct.new(:id, :name, :noun, :status, :type, keyword_init: true) unless defined?(EngageNpc)
 
+# Lich's Script seam as Engage sees it (start, running?, kill): a started
+# child runs until it is killed.
+unless defined?(EngageScripts)
+  class EngageScripts
+    attr_reader :started, :killed
+
+    def initialize = (@started = []; @killed = [])
+    def start(name, args = nil) = @started << [name, args]
+    def running?(name) = @started.any? { |n, _| n == name } && !@killed.include?(name)
+    def kill(name) = @killed << name
+  end
+end
+
 RSpec.describe EO::Engine::Engage::Routine do
   it 'splits the modifiers off the text and keeps the raw line' do
     lines = described_class.parse(['attack', '1030 (m20 once)', 'cman bullrush (!prone EB"Enh. Strength")'])
@@ -778,5 +791,39 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     policy.routines['a'] = ['eachtarget attack target']
     engage.tick(world)
     expect(calls.select { |tag, _| tag == :attack }.map { |_, kw| kw[:command] }).to eq(['attack #1', 'attack #2'])
+  end
+
+  # cmd_run_script waited 200 x 0.25 s and then answered :success with the
+  # child still running, and the wait never heard the engine's stop.
+  describe 'a routine script line' do
+    let(:scripts) { EngageScripts.new }
+    let(:clock) { OpenStruct.new(now: Time.at(10_000)) }
+    let(:engage) { described_class.new(policy: policy, targets_policy: tp, scripts: scripts, clock: clock, stance: ->(_s) { true }) }
+    let(:slept) { [] }
+
+    before { allow(engage).to receive(:sleep) { |n| slept << n; clock.now += n } }
+
+    def run_script = engage.send(:run_script, 'bigloot', '')
+
+    it 'returns once the child has ended' do
+      allow(scripts).to receive(:running?).and_return(false, true, true, false)
+      expect(run_script).to have_attributes(status: :success, reason: :script_ran)
+      expect(scripts.killed).to be_empty
+      expect(slept.size).to eq(2)
+    end
+
+    it 'kills a child still running at the deadline and fails the line' do
+      expect(run_script).to have_attributes(status: :failed, reason: :timeout)
+      expect(scripts.killed).to eq(['bigloot'])
+      expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_TIMEOUT)
+    end
+
+    it 'breaks off when the engine is stopping' do
+      allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+      allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+      expect(run_script).to have_attributes(status: :skipped, reason: :interrupted)
+      expect(slept).to be_empty
+      expect(scripts.killed).to eq(['bigloot'])
+    end
   end
 end
