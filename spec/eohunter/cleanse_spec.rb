@@ -280,6 +280,44 @@ RSpec.describe EO::Engine::Behaviors::Cleanse do
       expect(room.id).to eq(1)
     end
 
+    # Arriving in the room is not the end of the trip: go2 is still
+    # restoring gear. Cleanse used to act the moment the room matched, with
+    # the trip still on the holder, and the return stage then ticked that
+    # same trip, which answered "arrived" from the far room.
+    it 'finishes the outbound trip before acting, and comes home on a trip of its own' do
+      policy.itchy_curse = true
+      policy.safe_room = '77'
+      legs = []
+      slow = lambda do |r|
+        legs << r
+        t = instance_double(EO::Engine::Travel::Trip, suspend!: nil, cancel!: nil)
+        ticks = 0
+        # there on the first tick, go2 still running on the second, done on the third
+        allow(t).to receive(:tick) { ticks += 1; room.id = r; ticks < 3 ? nil : EO::Engine::Actions::Result.new(status: :success) }
+        t
+      end
+      curse = instance_double(EO::Engine::Actions::CleanseItchyCurse, call: EO::Engine::Actions::Result.new(status: :success, reason: :scratched))
+      allow(EO::Engine::Actions::CleanseItchyCurse).to receive(:new).and_return(curse)
+      cleanse = described_class.new(policy: policy, travel: slow)
+      EO::Engine::Events.emit(:itchy_curse)
+      cleanse.wants_control?(world)
+      expect(cleanse.tick(world)).to be_nil
+      expect(room.id).to eq(77)
+      expect(cleanse.tick(world)).to be_nil # in the room, trip still underway
+      expect(curse).not_to have_received(:call)
+      expect(cleanse.job.stage).to eq(:go)
+      expect(cleanse.tick(world)).to be_nil # trip done, the curse scratched, the way home next
+      expect(curse).to have_received(:call).once
+      expect(cleanse.job.stage).to eq(:return)
+      expect(legs).to eq([77])
+      expect(cleanse.tick(world)).to be_nil
+      expect(legs).to eq([77, 1]) # a trip home of its own
+      expect(room.id).to eq(1)
+      2.times { cleanse.tick(world) }
+      expect(cleanse.job).to be_nil
+      expect(room.id).to eq(1)
+    end
+
     it 'ends the job when the safe room cannot be reached, and reports a failed way home' do
       policy.itchy_curse = true
       policy.safe_room = '77'

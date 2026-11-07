@@ -1624,7 +1624,11 @@ module EO::Engine
         job = @job
         case job.stage
         when :go
-          if job.dest && world.room.id != job.dest
+          # A trip in flight is stepped to its end even once the room
+          # matches: go2 is still restoring gear after arrival, and a trip
+          # left on the holder would be the one the return stage ticked,
+          # reporting "arrived home" from the far room.
+          if job.dest && (@trip || world.room.id != job.dest)
             outcome = EO::Engine::Travel.step(self, @travel, job.dest, world)
             return nil if outcome == :underway
             # a blocking attempt that did not arrive, or a Trip's attempts
