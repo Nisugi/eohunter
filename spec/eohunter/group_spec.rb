@@ -941,6 +941,28 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.wants_control?(world)).to be false
   end
 
+  # The looter's Loot runs below Orders: it acks prepare_move before it
+  # has started looting, and the leader used to walk off the corpses.
+  it 'holds while a follower is still looting, then moves on' do
+    hub.report('Bob', report('Bob', looting: true))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    expect(muster.tick(world)).to be_nil
+    expect(hub.take_orders('Bob')).to be_empty
+
+    hub.report('Bob', report('Bob', looting: false))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:prepare_movement)
+    acknowledge_movement
+    hub.report('Bob', report('Bob', looting: true)) # a late loot assignment holds again
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    hub.report('Bob', report('Bob', looting: false))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:movement_ready)
+    expect(muster.wants_control?(world)).to be false
+  end
+
   it 'calls a missing follower back, once every ten seconds' do
     room.players = []
     expect(muster.wants_control?(world)).to be true

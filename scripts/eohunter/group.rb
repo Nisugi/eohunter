@@ -1709,6 +1709,13 @@ module EO::Engine
       # Seconds between repeated follow_now calls to a missing follower.
       REORDER = 10
 
+      # Why the hold, from the last wants_control?: :member_stunned,
+      # :member_roundtime, :follower_missing, :followers_looting,
+      # :prepare_movement or :movement_barrier; nil when not holding.
+      #
+      # @return [Symbol, nil]
+      attr_reader :reason
+
       # @param leader [Group::Leader] the leader's view of the Hub
       # @param resting [#call] -> Boolean, true while the leader is resting
       # @param fight [#call] (world) -> Boolean, true while a fight is on
@@ -1755,6 +1762,11 @@ module EO::Engine
                   elsif @leader.roundtime? then :member_roundtime
                   elsif !@leader.all_present?(world) then :follower_missing
                   elsif strict_movement? then strict_reason(world)
+                  # The assigned looter's Loot runs below Orders, so its
+                  # legacy prepare_move ack comes before it has started;
+                  # left to the ack alone the leader walks off the corpses.
+                  # (A strict follower refuses to prepare while looting.)
+                  elsif !@leader.looting_done? then :followers_looting
                   elsif !@movement_requested then :prepare_movement
                   elsif !@movement_ready then :movement_barrier
                   end
@@ -1768,7 +1780,7 @@ module EO::Engine
       # @param world [World]
       # @return [Actions::Result, nil] the step's result, nil when only waiting
       def tick(world)
-        return nil if %i[member_stunned member_roundtime].include?(@reason)
+        return nil if %i[member_stunned member_roundtime followers_looting].include?(@reason)
         if @reason == :prepare_movement
           if strict_movement?
             return nil unless @leader.prepare_movement(world.room.id, room_epoch: world.room.count)
