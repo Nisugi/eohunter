@@ -104,7 +104,7 @@ module EO::Engine
           entry = raw.to_s.strip
           case entry
           when /\b650\s?(\w+)?\s?(\w+)?\s?/ then Sign.new(entry: entry, kind: :assume, num: 650, args: [Regexp.last_match(1), Regexp.last_match(2)])
-          when /\b(?:515|rapid|rapidfire)(?:\s?\(?(\w+)\)?)?/ then Sign.new(entry: entry, kind: :rapid, num: 515, args: [Regexp.last_match(1)])
+          when /\b(?:515|rapid(?:\s?fire)?)\b(?:\s?\(?(\w+)\)?)?/ then Sign.new(entry: entry, kind: :rapid, num: 515, args: [Regexp.last_match(1)])
           when /^122420$/ then Sign.new(entry: entry, kind: :shout, num: 122420)
           when /^9605$/ then Sign.new(entry: entry, kind: :surge, num: 9605)
           when /^9625$/ then Sign.new(entry: entry, kind: :burst, num: 9625)
