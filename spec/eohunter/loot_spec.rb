@@ -443,6 +443,26 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     expect(loot.wants_control?(world)).to be true
   end
 
+  # The built-in room loot records the floor it leaves behind; the script
+  # path did not, so a final loot with a loot script started it again
+  # every tick for an item the script had decided to leave.
+  it 'does not restart the loot script for an item it left on the floor' do
+    policy.script = 'eloot'
+    policy.final = true
+    room.creatures = []
+    room.loot = [OpenStruct.new(id: '9', noun: 'wand', name: 'a copper wand', type: 'wand')]
+
+    expect(loot.wants_control?(world)).to be true
+    expect(loot.tick(world).reason).to eq(:script_started)
+    scripts.finish!('eloot')
+    expect(loot.tick(world).reason).to eq(:script_finished)
+    expect(loot.wants_control?(world)).to be false
+    expect(scripts.started.length).to eq(1)
+
+    room.loot << OpenStruct.new(id: '10', noun: 'gem', name: 'a blue gem', type: 'gem')
+    expect(loot.wants_control?(world)).to be true
+  end
+
   it 'ignores scenery in a revisited room, with or without a corpse having been there' do
     policy.final = true
     room.creatures = []
