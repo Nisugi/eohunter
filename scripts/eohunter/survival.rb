@@ -168,7 +168,11 @@ module EO::Engine
           break if result.success? || result.status == :failed
         end
         @stance.call(restore) if restore
-        result.success? ? result : Result.new(status: :failed, reason: :still_down, line: result.line)
+        # A ladder failure (:interrupted, :dead, :too_many_resends) keeps
+        # its own reason; :still_down is only the attempts running out.
+        return result if result.success? || result.status == :failed
+
+        Result.new(status: :failed, reason: :still_down, line: result.line)
       end
 
       # Lich's Stance.at?, false when Lich cannot answer.
