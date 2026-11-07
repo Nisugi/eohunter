@@ -160,7 +160,8 @@ RSpec.describe 'the routine words in routines.rb' do
     expect(run('resonance 908 910').reason).to eq(([908, 910] - [first]).first)
     expect(run('rapid').reason).to eq(515)
     me.define_singleton_method(:cooldown_active?) { |n| n == 'Rapid Fire Recovery' }
-    expect(run('rapid').reason).to eq(:cooldown)
+    # unsent, so a skip: as a failure it fed the repeated-failures watchdog
+    expect(run('rapid')).to have_attributes(status: :skipped, reason: :cooldown)
     expect(run('rapid ignore').reason).to eq(515)
   end
 

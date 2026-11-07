@@ -753,4 +753,22 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(engage.tick(world)).to equal(ok)
     expect(engage.tick(world)).to have_attributes(status: :skipped, reason: :condition, line: 'once')
   end
+
+  # 720 while Implosion cools: the gate refuses before anything is sent.
+  # As :failed it fed the repeated-failures watchdog (runner.rb track),
+  # which stopped the engine five ticks into the cooldown.
+  it 'skips, not fails, a spell line a gate refuses' do
+    policy.routines['a'] = ['720']
+    spells[720] = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 20, name: 'Implosion')
+    me.define_singleton_method(:cooldown_active?) { |n| n == 'Implosion' }
+    expect(EO::Engine::Actions::Cast).not_to receive(:new)
+    expect(engage.tick(world)).to have_attributes(status: :skipped, reason: :cooldown)
+  end
+
+  # ...but a spell we do not know is the routine's mistake, and the stop
+  # the watchdog brings is the point.
+  it 'still fails a spell line naming an unknown spell' do
+    policy.routines['a'] = ['999']
+    expect(engage.tick(world)).to have_attributes(status: :failed, reason: :unknown_spell)
+  end
 end
