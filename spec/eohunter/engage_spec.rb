@@ -771,4 +771,12 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     policy.routines['a'] = ['999']
     expect(engage.tick(world)).to have_attributes(status: :failed, reason: :unknown_spell)
   end
+
+  # run_line filled the placeholder before each_target swapped creatures,
+  # so `eachtarget attack target` with two creatures attacked #1 twice.
+  it 'fills target per creature under eachtarget' do
+    policy.routines['a'] = ['eachtarget attack target']
+    engage.tick(world)
+    expect(calls.select { |tag, _| tag == :attack }.map { |_, kw| kw[:command] }).to eq(['attack #1', 'attack #2'])
+  end
 end

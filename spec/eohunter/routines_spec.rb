@@ -201,6 +201,17 @@ RSpec.describe 'the routine words in routines.rb' do
     expect(engage.target.id).to eq('1')
   end
 
+  # The placeholder is filled per creature here, not once in run_line
+  # (which gave every creature the first one's id).
+  it 'fills the target placeholder with each creature in turn' do
+    room.targets << npc(2, 'orc')
+    allow(EO::Engine::Actions::Target).to receive(:new).and_return(instance_double(EO::Engine::Actions::Target, call: EO::Engine::Actions::Result.new(status: :success)))
+    wire(EO::Engine::Actions::Attack, 'You swing a katana at a kobold!')
+    allow(EO::Engine::Actions::Attack).to receive(:initiation_regex).and_return(/You swing/)
+    run('eachtarget attack target')
+    expect(sent).to eq(['attack #1', 'attack #2'])
+  end
+
   it "does not aim or fire when Lich's Injured says the arms cannot" do
     policy.archery_aim = ['head']
     me[:able_to_use_ranged?] = false

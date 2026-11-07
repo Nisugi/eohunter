@@ -903,6 +903,13 @@ module EO::Engine
       # @return [Object] the creature
       def retarget(creature) = @target = creature
 
+      # "target" in a routine line is the creature's #id.
+      #
+      # @param text [String] the line's text
+      # @param creature [#id] the creature the line runs on
+      # @return [String]
+      def with_target(text, creature) = text.gsub(/\btarget\b/, "##{creature.id}")
+
       # Below Survival, Flee, Loot and Rest; above Maintain and Wander.
       #
       # @return [Integer] 50
@@ -1154,7 +1161,10 @@ module EO::Engine
         return Actions::Result.new(status: :skipped, reason: :condition, line: blocked) if blocked
 
         preparation = named_preparation?(line.text)
-        text = preparation ? line.text : line.text.gsub(/\btarget\b/, "##{@target.id}")
+        # eachtarget swaps the creature per iteration (routines.rb
+        # each_target), so its placeholder is filled there, not here: filled
+        # here, two creatures both got "attack #1".
+        text = preparation || line.text =~ /^eachtarget\b/i ? line.text : with_target(line.text, @target)
         unless preparation
           soothe(world)
           reaction(world)
