@@ -1040,7 +1040,9 @@ module EO::Engine
           @prep_script = nil
         end
 
-        @remaining ||= commands.dup + scripts.map { |s| "script #{s}" }
+        # An "a and b" profile entry is an Array (Profile#split_xx); one
+        # line per tick, the way Routine.parse flattens them for combat.
+        @remaining ||= Array(commands).flatten + scripts.map { |s| "script #{s}" }
         if @remaining.empty?
           @remaining = nil
           @prep_script = nil
