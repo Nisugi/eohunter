@@ -20,18 +20,19 @@ you from nothing to a dry run and then a first hunt.
 
 ## Installing
 
-With the gem, the usual way:
+With the gem, the usual way. Download `eohunter-<version>.gem` from the
+latest [GitHub release](https://github.com/elanthia-online/eohunter/releases),
+then, from the folder it is in:
 
 ```
-gem install eohunter
+gem install ./eohunter-<version>.gem
 eohunter install
 ```
 
 `eohunter install` finds Lich (or takes `--lich-dir <path>`) and copies
-the script, its parts and the coordination library into `scripts/`. Run it
-again after `gem update eohunter` to upgrade; `eohunter doctor` shows what
-is installed. Until the gem is on rubygems.org, install the `.gem` file
-attached to a GitHub release: `gem install ./eohunter-<version>.gem`.
+the script, its parts and the coordination library into `scripts/`. To
+upgrade, `gem install` the newer `.gem` and run `eohunter install` again;
+`eohunter doctor` shows what is installed.
 
 From a build: the repo builds one `eohunter.lic` with the engine inlined,
 and `libeocoordination.lic` (see the README section on building). Drop

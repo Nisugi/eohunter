@@ -2,9 +2,8 @@ name: release
 
 # A tag like v0.5.1 builds the single-file eohunter.lic and the eohunter
 # gem and attaches them (with the line maps) to a GitHub release of the
-# same name. The gem is pushed to rubygems.org only when the repository
-# variable RUBYGEMS_PUSH is "true" and the secret RUBYGEMS_API_KEY holds
-# an Elanthia Online push key; until then the push step is skipped.
+# same name. Players install the gem from the release file; it is not
+# pushed to rubygems.org.
 on:
   push:
     tags:
@@ -40,8 +39,3 @@ jobs:
             dist/libeocoordination.lic.map
             dist/eohunter-*.gem
           generate_release_notes: true
-      - name: Push the gem to rubygems.org
-        if: ${{ vars.RUBYGEMS_PUSH == 'true' }}
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: gem push dist/eohunter-*.gem

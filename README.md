@@ -8,24 +8,23 @@ as one of its behaviors.
 ## Installing
 
 eohunter needs Lich 5.22.0 or later. It installs as a Ruby gem that copies
-the scripts into Lich:
+the scripts into Lich. Download `eohunter-<version>.gem` from the latest
+[GitHub release](https://github.com/elanthia-online/eohunter/releases),
+then, from the folder it is in:
 
 ```
-gem install eohunter
+gem install ./eohunter-<version>.gem
 eohunter install
 ```
 
 `eohunter install` finds Lich (from `--lich-dir <path>`, else `LICH_DIR`,
 else the usual places) and copies `eohunter.lic`, its `eohunter/` parts and
 the coordination library into Lich's `scripts/`. Any Ruby works for this,
-not only Lich's own. To upgrade, `gem update eohunter` and run
-`eohunter install` again: files a newer version dropped are removed.
+not only Lich's own. To upgrade, download the newer `.gem`, `gem install`
+it and run `eohunter install` again: files a newer version dropped are removed.
 `eohunter doctor` shows the Lich it found, its version, and what is
 installed; `eohunter uninstall` removes exactly what install put there.
 Profiles and settings under `data/` are never touched.
-
-Until the gem is on rubygems.org, each GitHub release carries the
-`.gem` file: download it and `gem install ./eohunter-<version>.gem`.
 
 ## Running it
 
@@ -257,9 +256,7 @@ line reference.
 `exe/eohunter`) and the `scripts/` it copies. The version is
 `EO::Engine::VERSION`, and the Lich it requires is the `required:` line
 of `eohunter.lic`'s header. A release tag attaches the gem to the
-GitHub release, and pushes it to rubygems.org once the repository
-variable `RUBYGEMS_PUSH` is `true` and the `RUBYGEMS_API_KEY` secret is
-set.
+GitHub release; it is not published to rubygems.org.
 
 ## Building the single-file scripts
 
