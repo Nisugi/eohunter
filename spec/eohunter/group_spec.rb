@@ -191,6 +191,24 @@ RSpec.describe EO::Engine::Group::Leader do
     expect(leader.rest_prep_complete?).to be true # reported back
   end
 
+  # Clearing the stored flag is not enough: a report made before the
+  # follower processed the new order (a heartbeat republishes the last
+  # one) still carries last cycle's true and lands after the broadcast.
+  it 'does not accept a stale report made for the previous cycle' do
+    hub.broadcast(:resting_prep, room: 1)
+    cycle = hub.rest_prep_cycle
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle)) }
+    expect(leader.rest_prep_complete?).to be true
+
+    order = hub.broadcast(:resting_prep, room: 1)
+    expect(order.payload).to eq(cycle + 1)
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle)) }
+    expect(leader.rest_prep_complete?).to be false # last cycle's word, filed late
+
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle + 1)) }
+    expect(leader.rest_prep_complete?).to be true
+  end
+
   it 'leaves the flag alone for every other order' do
     %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true)) }
     hub.broadcast(:prep_rest, room: 1)
@@ -578,7 +596,10 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(orders.rest_prep_done).to be false
     run
     expect(scripts.started).to eq([['eloot', nil], ['eherbs', nil]])
-    expect(orders.rest_prep_done).to be true
+    expect(orders.rest_prep_done).to eq(hub.rest_prep_cycle) # done, for this cycle
+    echoed = EO::Engine::Group.report(world, name: 'Bob', rest_policy: policy, counters: EO::Engine::Rest::Counters.new,
+                                             rest_prep_done: orders.rest_prep_done)
+    expect([echoed.rest_prep_done, echoed.rest_prep_cycle]).to eq([true, hub.rest_prep_cycle])
     scripts.run!('eloot')
     hub.broadcast(:hunting_scripts_stop, room: 1)
     run
