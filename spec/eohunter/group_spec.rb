@@ -1287,6 +1287,30 @@ RSpec.describe EO::Engine::Behaviors::Loot, 'with a group' do
     expect(loot.wants_control?(world)).to be false # that corpse is theirs
   end
 
+  # The assignment goes out as a broadcast naming the looter, and the
+  # leader's Muster must hold on it before Bob's own report says looting.
+  it 'holds the leader from the assignment until the looter reports done' do
+    me[:webbed?] = false; me[:sleeping?] = false; me[:stunned?] = false; me[:hidden?] = false
+    room.players = [player('Bob')]
+    world[:group_nouns] = ['Bob']
+    loot = described_class.new(policy: policy, targets_policy: tp, group: leader)
+    muster = EO::Engine::Behaviors::Muster.new(leader: leader, resting: -> { false }, fight: ->(_w) { false }, clock: OpenStruct.new(now: Time.at(1000)))
+    expect(leader.looting_done?).to be true
+
+    expect(loot.tick(world).reason).to eq(:loot_assigned)
+    expect(leader.looting_done?).to be false
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # the heartbeat's copy of the old report
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: true, at: nil)) # taken and started
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # done
+    expect(leader.looting_done?).to be true
+    expect(muster.wants_control?(world)).to be true # on to preparing the move
+    expect(muster.reason).not_to eq(:followers_looting)
+  end
+
   it 'loots itself when it is the looter, telling the followers to count the kill' do
     group_policy.looter = nil
     loot = described_class.new(policy: policy, targets_policy: tp, group: leader)

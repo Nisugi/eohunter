@@ -480,6 +480,9 @@ module EO::Engine
           end
           order = make_order(type, payload, room)
           @queues.each_value { |q| q << order }
+          # The leader's Loot assigns the room this way: a :loot broadcast
+          # naming the looter in its payload (Loot#tick -> Leader#order).
+          loot_assigned(payload) if type == :loot
           order
         end
       end
@@ -502,16 +505,23 @@ module EO::Engine
         order = make_order(type, payload, room)
         @mutex.synchronize do
           (@queues[name.to_s] ||= []) << order
-          # The looter is looting from the moment the order exists: its
-          # own report says so only once it has taken the order and
-          # ticked, and until then the last report (republished by the
-          # heartbeat) still says false, which read as done.
-          if type == :loot
-            @loot_pending[name.to_s] = @clock.now
-            @reports[name.to_s]&.looting = true
-          end
+          loot_assigned(name) if type == :loot
         end
         order
+      end
+
+      # The looter is looting from the moment a loot order names it: its
+      # own report says so only once it has taken the order and ticked,
+      # and until then the last report (republished by the heartbeat)
+      # still says false, which read as done. Called under the mutex.
+      #
+      # @param name [String, Symbol, nil] the looter the order names
+      # @return [void]
+      def loot_assigned(name)
+        return if name.nil? || name.to_s.empty?
+
+        @loot_pending[name.to_s] = @clock.now
+        @reports[name.to_s]&.looting = true
       end
 
       # Whether an order of this type is still queued for the follower.
