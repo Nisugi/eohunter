@@ -74,6 +74,61 @@ If you are running the built single file and an error names a line,
 says which part that line is in. Subtract the part's first line to get
 the line within the part.
 
+## The debug trace
+
+The lines above are what the engine says on its own. The debug trace is
+everything it thinks: every event on the bus, filed under a category,
+and on request one line per tick saying who held it and why everyone
+above declined. bigshot's `debug` has the same shape (a switch,
+categories, a file with the game feed mirrored in); here the categories
+are the event names, so nothing is left out by accident.
+
+```
+;eohunter debug                     what is on
+;eohunter debug on | off            the trace; lines go to the front end, or to the file when that is on
+;eohunter debug all                 every category
+;eohunter debug combat,group        only these (from all), or these as well (from a list)
+;eohunter debug rest off            this category no more
+;eohunter debug tick [on|off]       one line per engine tick
+;eohunter debug file [on|off]       write to logs/debug/<game>-<char>/eohunter.log instead of the front end
+;eohunter debug feed [on|off]       mirror the raw game feed into that file too (file must be on)
+;eohunter debug help                the same, in game
+;eohunter <profile> debug           start a hunt with the trace on; `debug=combat,movement` for a subset,
+                                    `debug file`, `debug tick` and `debug feed` set those as well
+```
+
+The categories: `combat` (engaged, each routine line started and
+resolved with the creature's health and status, disengaged with how long
+and how many commands it took), `movement` (trips, rooms, bounds),
+`rest`, `group` (orders, holds, the looter), `recovery` (flee, cleanse,
+death, disarm, loadout), `bounty`, `engine` (start, stop, preemption,
+the watchdog, the tick line).
+
+The settings persist per character, and a running hunt picks a change up
+within a tick, so `;eohunter debug tick` from a second window turns the
+tick line on in the hunt already running. While the file is on the hunt
+says so at start and at exit, since a forgotten trace grows; the file is
+rolled to `.1` at 20 MB when a run opens it.
+
+A stretch of a solo hunt with everything on reads like this. The `>>>`
+and `<<<` lines are the feed mirror, so the game's actual words sit
+between an action's start and its result:
+
+```
+21:14:03.405 engine   8030   tick #6 holder=engage status=success reason=targeted | declined: survival=none flee=none rest=none loot=none
+21:14:03.405 combat   8030   engaged target=223891 name="greater kappa" routine=a
+21:14:03.661 combat   8030   routine_action_started target=223891 name="greater kappa" routine=a command=attack resources=mana:84,health:150,spirit:10,stamina:100 hp=100 status=""
+21:14:03.662 >>> attack #223891
+21:14:04.010 <<< You swing a vultite claidhmore at a greater kappa!
+21:14:06.903 combat   8030   routine_action_resolved target=223891 name="greater kappa" routine=a command=attack status=success reason=- line="" resources_before=... resources_after=... hp=61 status=prone
+21:14:10.421 combat   8030   disengaged target=223891 name="greater kappa" status=dead why=no_target engaged_for=7.0 commands=2 hp=0
+21:14:10.422 engine   8030   tick #33 holder=loot status=success reason=corpses | declined: survival=none flee=none rest=not_fried
+```
+
+Grepping the file for one creature's id gives its whole fight. `rest=not_fried`
+on the tick line is Rest's own reason for declining, which is the answer
+to "why is it not resting yet".
+
 ## Common causes
 
 - **A room did not resolve.** `dry` prints the hunting room and the
