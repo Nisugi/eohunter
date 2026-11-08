@@ -231,14 +231,16 @@ module EO::Engine
       # @bigshot cmd_rapid
       # @param world [World]
       # @param ignore [String, nil] "ignore" to cast through Rapid Fire Recovery
-      # @return [Actions::Result] the cast, or the gate that refused
+      # @return [Actions::Result] the cast; skipped with :active or
+      #   :cooldown, failed with :unknown_spell or :unaffordable
       def rapid(world, ignore)
         s = world.spell[515]
         me = world.me
         return Actions::Result.new(status: :failed, reason: :unknown_spell) unless s&.known?
         return Actions::Result.new(status: :failed, reason: :unaffordable) unless s.affordable?
-        return Actions::Result.new(status: :failed, reason: :active) if me.effect_active?('Rapid Fire') && me.buff_time_left('Rapid Fire') > 0.05
-        return Actions::Result.new(status: :failed, reason: :cooldown) if me.cooldown_active?('Rapid Fire Recovery') && ignore.to_s.empty?
+        # Unsent refusals, so skips: as failures they fed the watchdog.
+        return Actions::Result.new(status: :skipped, reason: :active) if me.effect_active?('Rapid Fire') && me.buff_time_left('Rapid Fire') > 0.05
+        return Actions::Result.new(status: :skipped, reason: :cooldown) if me.cooldown_active?('Rapid Fire Recovery') && ignore.to_s.empty?
 
         Actions::Cast.new(world, spell: 515).call
       end

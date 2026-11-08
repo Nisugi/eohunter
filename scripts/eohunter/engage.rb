@@ -1383,7 +1383,8 @@ module EO::Engine
       # @param num [Integer] the spell number
       # @param extra [String] the cast word and element, empty for none
       # @return [Actions::Result] the Cast's, Wand's or Wrack's result;
-      #   failed with the gate's reason or :out_of_mana
+      #   skipped with the gate's reason; failed with :unknown_spell or
+      #   :out_of_mana
       def spell(world, incant, num, extra)
         reason = EO::Engine::Engage::SpellGates.reason(world, num, @target, @state, @policy)
         if reason == :unaffordable
@@ -1396,7 +1397,12 @@ module EO::Engine
             return Actions::Result.new(status: :failed, reason: :out_of_mana)
           end
         elsif reason
-          return Actions::Result.new(status: :failed, reason: reason)
+          # The gate refused before anything was sent. As a failure this fed
+          # the repeated-failures watchdog (runner.rb track), which stopped
+          # the engine five ticks into an Implosion cooldown. An unknown
+          # spell stays a failure: the routine is wrong, and the stop is
+          # the point.
+          return Actions::Result.new(status: reason == :unknown_spell ? :failed : :skipped, reason: reason)
         end
 
         # bigshot cmd_spell 5900-5906: 506 and 902 cast bare, every other
