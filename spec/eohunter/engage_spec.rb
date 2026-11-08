@@ -5,6 +5,27 @@ require_relative 'engine_helper'
 
 EngageNpc = Struct.new(:id, :name, :noun, :status, :type, keyword_init: true) unless defined?(EngageNpc)
 
+# Lich's Script seam as Engage sees it (start, running?, kill): a started
+# child runs until it is killed.
+unless defined?(EngageScripts)
+  class EngageScripts
+    attr_reader :started, :killed
+
+    # linger: how many running? calls after a kill still answer true (a
+    # script unwinding its cleanup hooks)
+    def initialize(linger: 0) = (@started = []; @killed = []; @linger = linger)
+    def start(name, args = nil) = @started << [name, args]
+    def kill(name) = @killed << name
+
+    def running?(name)
+      return false unless @started.any? { |n, _| n == name }
+      return true unless @killed.include?(name)
+
+      (@linger -= 1) >= 0
+    end
+  end
+end
+
 RSpec.describe EO::Engine::Engage::Routine do
   it 'splits the modifiers off the text and keeps the raw line' do
     lines = described_class.parse(['attack', '1030 (m20 once)', 'cman bullrush (!prone EB"Enh. Strength")'])
@@ -778,5 +799,87 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     policy.routines['a'] = ['eachtarget attack target']
     engage.tick(world)
     expect(calls.select { |tag, _| tag == :attack }.map { |_, kw| kw[:command] }).to eq(['attack #1', 'attack #2'])
+  end
+
+  # cmd_run_script waited 200 x 0.25 s and then answered :success with the
+  # child still running, and the wait never heard the engine's stop.
+  describe 'a routine script line' do
+    let(:scripts) { EngageScripts.new }
+    let(:clock) { OpenStruct.new(now: Time.at(10_000)) }
+    let(:engage) { described_class.new(policy: policy, targets_policy: tp, scripts: scripts, clock: clock, stance: ->(_s) { true }) }
+    let(:slept) { [] }
+
+    before { allow(engage).to receive(:sleep) { |n| slept << n; clock.now += n } }
+
+    def run_script = engage.send(:run_script, 'bigloot', '')
+
+    it 'returns once the child has ended' do
+      allow(scripts).to receive(:running?).and_return(false, true, true, false)
+      expect(run_script).to have_attributes(status: :success, reason: :script_ran)
+      expect(scripts.killed).to be_empty
+      expect(slept.size).to eq(2)
+    end
+
+    it 'kills a child still running at the deadline and fails the line' do
+      expect(run_script).to have_attributes(status: :failed, reason: :timeout)
+      expect(scripts.killed).to eq(['bigloot'])
+      expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_TIMEOUT)
+    end
+
+    it 'breaks off when the engine is stopping' do
+      allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+      allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+      expect(run_script).to have_attributes(status: :skipped, reason: :interrupted)
+      expect(slept).to be_empty
+      expect(scripts.killed).to eq(['bigloot'])
+    end
+
+    # Lich's kill is a request: the script's cleanup hooks still run, and
+    # can still send commands, after it. The tick is held until the child
+    # has actually stopped, and a child that never does fails the line
+    # under its own name.
+    context 'when the killed child takes a while to stop' do
+      let(:scripts) { EngageScripts.new(linger: 3) }
+
+      it 'holds the tick until the child has stopped' do
+        expect(run_script).to have_attributes(status: :failed, reason: :timeout)
+        expect(scripts.running?('bigloot')).to be false
+        expect(slept.last(3)).to eq([0.1, 0.1, 0.1])
+      end
+
+      it 'holds the tick for the stop on interruption too' do
+        allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+        allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+        expect(run_script).to have_attributes(status: :skipped, reason: :interrupted)
+        expect(slept).to eq([0.1, 0.1, 0.1])
+      end
+    end
+
+    # A child that will not die keeps sending whatever the engine does
+    # next, so the line's failure is fatal: the runner stops on it at
+    # once instead of counting it toward the five.
+    context 'when the killed child never stops' do
+      let(:scripts) { EngageScripts.new(linger: 1_000) }
+
+      it 'fails the line as stuck, fatally, after the bounded wait' do
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
+        expect(slept.last).to eq(0.1)
+        expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_TIMEOUT + EO::Engine::Behaviors::Engage::SCRIPT_STOP_WAIT)
+      end
+
+      it 'is stuck, not interrupted, when the stop on interruption fails' do
+        allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+        allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
+        expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_STOP_WAIT)
+      end
+
+      it 'does not start a second instance over a first that will not stop' do
+        scripts.start('bigloot', nil)
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
+        expect(scripts.started.size).to eq(1)
+        expect(scripts.killed).to eq(['bigloot'])
+      end
+    end
   end
 end

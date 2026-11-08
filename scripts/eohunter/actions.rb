@@ -35,7 +35,12 @@ module EO::Engine
     # @!attribute acted
     #   @return [Boolean, nil] true when a command went to the game for this
     #     result; stamped by Base#call alone, never set by hand
-    Result = Struct.new(:status, :event, :reason, :line, :acted, keyword_init: true) do
+    # @!attribute fatal
+    #   @return [Boolean, nil] true when this failure means the engine must
+    #     not act again: the behavior could not tear down what it started
+    #     (a child script that will not die), so every further command
+    #     would overlap it. The runner stops at once instead of counting.
+    Result = Struct.new(:status, :event, :reason, :line, :acted, :fatal, keyword_init: true) do
       # @return [Boolean] true when the status is :success
       def success? = status == :success
       # @return [Boolean] true when the status is :skipped
@@ -50,6 +55,8 @@ module EO::Engine
       #
       # @return [Boolean]
       def acted? = acted == true
+      # @return [Boolean] true when the engine must stop on this result
+      def fatal? = fatal == true
     end
 
     # Mixed into the actions that CAST or SWING - the only ones soft cast

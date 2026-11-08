@@ -99,6 +99,22 @@ RSpec.describe EO::Engine::Engine do
     expect(tripped.first[:line]).to eq('You are unable to do that.')
   end
 
+  # A behavior that could not undo what it started (a killed child script
+  # still running) says so with a fatal result: one is enough, since
+  # every tick spent on the streak is another command beside the child.
+  it 'stops at once on a fatal failed action' do
+    stuck = behavior(priority: 0, wants: true,
+                     result: EO::Engine::Actions::Result.new(status: :failed, reason: :script_stuck, line: 'bigloot', fatal: true))
+    tripped = []
+    EO::Engine::Events.on(:watchdog_tripped) { |e| tripped << e.data }
+    engine = described_class.new(world: world, behaviors: [stuck],
+                                 interval: 0, max_consecutive_failures: 3)
+    engine.tick
+    expect(engine.stopping?).to be(true)
+    expect(engine.stop_reason).to eq(:fatal_action)
+    expect(tripped.first).to include(kind: :fatal_action, count: 1, reason: :script_stuck, line: 'bigloot')
+  end
+
   it 'resets the failure count on success' do
     results = [
       EO::Engine::Actions::Result.new(status: :timeout),

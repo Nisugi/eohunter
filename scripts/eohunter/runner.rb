@@ -272,6 +272,16 @@ module EO::Engine
     # and a gate refusal or a stance no-op can say :failed or :success
     # without the game ever hearing a command.
     def track(behavior, result)
+      # A fatal failure is not one of N: the behavior says it could not
+      # undo what it started (a killed child still running), so waiting
+      # four more ticks for the streak means four more ticks of commands
+      # on the wire beside it.
+      if result.respond_to?(:fatal?) && result.fatal?
+        trip(:fatal_action, behavior, 1,
+             reason: result.respond_to?(:reason) ? result.reason : nil,
+             line: result.respond_to?(:line) ? result.line : nil)
+        return
+      end
       if result.respond_to?(:failed?) && result.failed?
         @consecutive_failures += 1
         if @consecutive_failures >= @max_failures

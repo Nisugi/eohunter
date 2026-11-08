@@ -1057,6 +1057,13 @@ module EO::Engine
       # literal cap but breaks every second on rest or a dead target, so a
       # runaway N never actually runs there (cmd_sleep 6548).
       MAX_ROUTINE_SLEEP = 60
+      # The longest a routine's `script name` holds the tick for its child;
+      # the old 200 x 0.25 s wait, now with a kill and a failure at the end.
+      SCRIPT_TIMEOUT = 50
+      # Seconds a killed child is given to finish stopping before the tick
+      # is released: Lich's kill is a request, and the script's own cleanup
+      # hooks can still send commands while it unwinds.
+      SCRIPT_STOP_WAIT = 5
 
       def grouped? = !@group.nil? && !@group.solo?
 
@@ -1525,14 +1532,49 @@ module EO::Engine
 
       # cmd_run_script: run it and wait for it, a tick at a time
       # would be better; bigshot blocks and so does this until Travel.
+      # The wait breaks on the engine's stop seam, and a child still
+      # running at the deadline is killed and the line failed: left alone
+      # it kept running under the next line, and the line read :success.
       def run_script(name, args)
-        if @scripts.running?(name)
-          @scripts.kill(name)
-          20.times { break unless @scripts.running?(name); sleep 0.1 }
-        end
+        return script_stuck(name) if @scripts.running?(name) && !stop_script(name)
+
         @scripts.start(name, args.to_s.empty? ? nil : args)
-        200.times { break unless @scripts.running?(name); sleep 0.25 }
+        deadline = @clock.now + SCRIPT_TIMEOUT
+        while @scripts.running?(name)
+          if Actions::Base.respond_to?(:interrupt) && Actions::Base.interrupt&.call
+            return script_stuck(name) unless stop_script(name)
+
+            return Actions::Result.new(status: :skipped, reason: :interrupted)
+          end
+          if @clock.now >= deadline
+            return script_stuck(name) unless stop_script(name)
+
+            return Actions::Result.new(status: :failed, reason: :timeout, line: name)
+          end
+          sleep 0.25
+        end
         Actions::Result.new(status: :success, reason: :script_ran)
+      end
+
+      # A child that would not stop is still on the wire, whatever the
+      # engine does next, so this is not one failure among five: the
+      # runner stops on it at once, naming the script.
+      def script_stuck(name)
+        Actions::Result.new(status: :failed, reason: :script_stuck, line: name, fatal: true)
+      end
+
+      # Kill the child and wait, bounded, until it has actually stopped.
+      #
+      # @return [Boolean] true when it is gone
+      def stop_script(name)
+        @scripts.kill(name)
+        deadline = @clock.now + SCRIPT_STOP_WAIT
+        while @scripts.running?(name)
+          return false if @clock.now >= deadline
+
+          sleep 0.1
+        end
+        true
       end
 
       def unsupported(line)
