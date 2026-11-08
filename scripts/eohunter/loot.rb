@@ -426,6 +426,9 @@ module EO::Engine
         @script_running = false
         @looted.concat(@script_corpses)
         @script_corpses = []
+        # What the script left on the floor is left on purpose; without the
+        # signature a final loot started the script again every tick.
+        @floor_looted_signature = floor_signature(world)
         if @scripts.paused?(name)
           @scripts.kill(name)
           box = [world.hands.right, world.hands.left].find { |h| h.type.to_s =~ /box/ }
