@@ -51,8 +51,8 @@ module EO
       # How far either side of the character's own level to look, before the
       # player says otherwise. Downward is narrower than upward because the
       # question is usually "what can I take on", not "what can I farm".
-      LEVEL_BELOW = 5
-      LEVEL_ABOVE = 10
+      LEVEL_BELOW = 10
+      LEVEL_ABOVE = 15
 
       # The level range to open with.
       # @param level [Integer, nil] the character's level
@@ -78,12 +78,22 @@ module EO
           boss: value(template, :boss) == true,
           bcs: value(template, :bcs) == true,
           max_hp: value(template, :max_hp),
-          otherclass: Array(value(template, :otherclass)).map(&:to_s),
+          otherclass: Array(value(template, :otherclass)).map { |entry| class_name(entry) }.reject(&:empty?).uniq,
           areas: Array(value(template, :areas)).filter_map { |area| area_name(area) }.uniq,
           # Kept as written: nil is "not catalogued", and flattening it to
           # false is the whole trap SPARSE exists to describe.
           traits: SPARSE.to_h { |trait| [trait, trait_value(template, trait)] }
         }
+      end
+
+      # A classification as one spelling. The templates write the same
+      # class several ways -- "Non-corporeal undead", "Non Corporeal undead"
+      # -- and a filter that offered both would split one class in two.
+      # @param text [String] as the template wrote it
+      # @return [String] lower case, hyphens and runs of space as one space
+      def class_name(text)
+        words = text.to_s.downcase.gsub(/[-_[:space:]]+/, ' ').strip
+        words.empty? ? '' : words[0].upcase + words[1..]
       end
 
       # Every creature, described.
@@ -180,10 +190,11 @@ module EO
         level = entry[:level]
         low = query[:low]
         high = query[:high]
-        # A creature with no level recorded is shown rather than filtered out:
-        # 5% of them have none, and hiding them for a missing field is the
+        # A creature with no level recorded (5% of them) cannot be placed in
+        # a band, so a band hides it, and says so beside the list. It is
+        # still found by name: hiding it from a search for it would be the
         # same mistake as treating an unknown trait as a no.
-        return true if level.nil?
+        return !query[:name].to_s.strip.empty? if level.nil?
 
         return false if low && level < low.to_i
         return false if high && level > high.to_i

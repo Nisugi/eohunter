@@ -48,7 +48,7 @@ Mana.pulse, #1581 Bank, #1583 the PSM readers, #1584 Fog, #1585 the spell
 refresh, #1586 Combat::Messages, #1587 bounded fput). On an older Lich the
 script refuses to start and says to update.
 
-`;eohunter setup` opens a GTK editor for hunts: open one, import a Bigshot
+`;eohunter setup` opens a hunt editor in Lich's WebUI: open one, import a Bigshot
 profile, change its settings, validate it against the installed engine,
 and save it as an eohunter hunt. It never writes to a Bigshot profile.
 Cleanse reads `data/<game>/<char>/ecleanse.yaml`, which ecleanse's own

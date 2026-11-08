@@ -14,7 +14,7 @@
     ;eohunter <profile> tail [uri]         follow a leader (the rally whisper names the uri)
     ;eohunter bounty [<creature>] [head|tail]   ebounty's hunt child, as "bigshot bounty": the profile
                                            ebounty put in UserVars.op, its bounty_eval, exit at rest
-    ;eohunter setup                        open the hunt editor (GTK)
+    ;eohunter setup                        open the hunt editor in the WebUI
     ;eohunter reload                       drop what is loaded, so the next run reads the files fresh
 
   Behaviors by priority: Survival 0, Cleanse 5 (ecleanse folded in; its

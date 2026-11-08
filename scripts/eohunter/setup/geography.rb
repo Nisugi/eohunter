@@ -18,7 +18,10 @@ module EO
       VERIFICATION = 'Data-derived; not field-checked'
 
       # Settings displayed by the persistent profile map, not target suggestions.
-      MAP_SETTINGS = %w[hunting_room_id hunting_boundaries resting_room_id field_rest_room_id].freeze
+      MAP_SETTINGS = %w[hunting_room_id hunting_boundaries rallypoint_room_ids resting_room_id field_rest_room_id].freeze
+
+      # The map settings that hold several rooms, as comma text.
+      LIST_MARKERS = %w[hunting_boundaries rallypoint_room_ids].freeze
 
       # Static adapter for the existing hunting-area walker. Reads exit keys,
       # never invokes a movement expression or a live-world passability check.
@@ -143,7 +146,7 @@ module EO
         refs = []
         MAP_SETTINGS.each do |key|
           raw = settings[key]
-          entries = key == 'hunting_boundaries' ? (raw.is_a?(Array) ? raw : raw.to_s.split(',')) : [raw]
+          entries = LIST_MARKERS.include?(key) ? (raw.is_a?(Array) ? raw : raw.to_s.split(',')) : [raw]
           ids = entries.filter_map do |entry|
             ref = entry.to_s.strip
             next if ref.empty? || ref == '0'
@@ -162,7 +165,7 @@ module EO
             refs << { ref: ref, id: mapped.first } if key == 'hunting_boundaries'
             mapped.first
           end
-          markers[key] = key == 'hunting_boundaries' ? ids.uniq.sort : ids.first
+          markers[key] = LIST_MARKERS.include?(key) ? ids.uniq.sort : ids.first
         end
         catalog = @rooms.values.filter_map { |room| room.image.to_s if room.respond_to?(:image) && !room.image.to_s.empty? }.uniq.sort
         raise ArgumentError, 'unknown map sheet' if sheet && !sheet.empty? && !catalog.include?(sheet)
@@ -201,6 +204,82 @@ module EO
         { markers: markers, boundary_refs: refs, rooms: visible.map { |id| room_description(id) }, room_edges: edges,
           hunting_room_ids: hunting, truncated: walked ? walked.too_big? : false,
           sheets: catalog, sheet_labels: @map_labels.slice(*catalog), diagnostics: diagnostics, editable: editable, verification: VERIFICATION }
+      end
+
+      # Every name a player might type for a place: each sheet's own name,
+      # and each location rooms are drawn under, with the sheet most of
+      # that location is drawn on. For filling in as they type.
+      # @return [Array<Hash>] name and image, sorted by name
+      def area_names
+        @area_names ||= begin
+          names = @map_labels.map { |image, label| { name: label.to_s, image: image } }
+          by_location = Hash.new { |hash, key| hash[key] = Hash.new(0) }
+          @rooms.each_value do |room|
+            next unless room.respond_to?(:image) && !room.image.to_s.empty? && room.respond_to?(:location)
+
+            location = room.location.to_s
+            by_location[location][room.image.to_s] += 1 unless location.empty?
+          end
+          by_location.each do |location, sheets|
+            names << { name: location, image: sheets.max_by { |image, count| [count, image] }.first }
+          end
+          names.uniq { |entry| entry[:name].downcase }.sort_by { |entry| entry[:name].downcase }
+        end
+      end
+
+      # The creatures the templates place in any of these rooms, by the
+      # rooms' UIDs: what a hunt walking exactly these rooms will meet.
+      # @param room_ids [Array<Integer>] mapped room ids; unknown ones are skipped
+      # @return [Array<Hash>] name, level and undead, by name
+      # The map sheets a creature's rooms are drawn on, from the room uids
+      # its templates record. Names are no use here: most template area
+      # names match no map area name, but the rooms are the rooms.
+      # @param name [String] the creature as the templates name it
+      # @return [Array<Hash>] id (the sheet file) and name (its label), sorted
+      def creature_sheets(name)
+        wanted = name.to_s
+        templates = @templates.select { |t| t.name.to_s.casecmp?(wanted) }
+        uids = templates.flat_map { |t| Array(t.areas).flat_map { |area| area_uids(area) } }.uniq
+        maps_for_uids(uids)
+      end
+
+      def creatures_in_rooms(room_ids)
+        ids = Array(room_ids).map { |id| id.to_i }.select { |id| @rooms.key?(id) }
+        return [] if ids.empty?
+
+        co_spawns(ids)
+      end
+
+      # Rooms drawn on a sheet whose title or location contains the words
+      # typed, or whose id or UID is what was typed: for finding the sheet
+      # to mark rooms on. Titles are matched first, then locations.
+      # @param query [String] part of a title, a location, a room id or uNNNN
+      # @param limit [Integer] how many to return
+      # @return [Array<Hash>] id, title, location, image and the sheet's label
+      def room_search(query:, limit: 40)
+        needle = query.to_s.strip.downcase
+        return [] if needle.empty?
+
+        drawn = @rooms.values.select { |room| room.respond_to?(:image) && !room.image.to_s.empty? && room.respond_to?(:image_coords) && room.image_coords }
+        found = if needle.match?(/\Au\d+\z/)
+                  ids = Array(@uid_resolver.call(needle[1..].to_i))
+                  drawn.select { |room| ids.include?(room.id) }
+                elsif needle.match?(/\A\d+\z/)
+                  drawn.select { |room| room.id == needle.to_i }
+                else
+                  drawn.filter_map do |room|
+                    title = Array(room.title).first.to_s
+                    location = room.respond_to?(:location) ? room.location.to_s : ''
+                    rank = if title.downcase.include?(needle) then 0
+                           elsif location.downcase.include?(needle) then 1
+                           end
+                    [rank, room] if rank
+                  end.sort_by { |(rank, room)| [rank, room.id] }.map(&:last)
+                end
+        found.first(limit).map do |room|
+          description = room_description(room.id)
+          description.merge(sheet_label: @map_labels[room.image] || room.image)
+        end
       end
 
       # Calculate boundaries for explicit manual membership using native map
@@ -556,7 +635,11 @@ module EO
 
       def creature(template)
         { name: template.name.to_s, level: template.level,
-          undead: template.respond_to?(:undead) ? template.undead : nil }
+          undead: template.respond_to?(:undead) ? template.undead : nil,
+          # The bestiary's boss classification: nil, "pack", "miniboss" or
+          # "boss". A boss-type creature is one that can carry boons.
+          boss_type: template.respond_to?(:boss_type) ? template.boss_type : nil,
+          boss: template.respond_to?(:boss) ? template.boss == true : false }
       end
 
       def area_uids(area)
