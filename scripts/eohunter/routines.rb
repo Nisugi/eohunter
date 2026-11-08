@@ -319,7 +319,7 @@ module EO::Engine
         Targets.candidates(world.room.targets, engage.targets_policy).each do |creature|
           Actions::Target.new(world, target: creature).call unless world.me.current_target_id.to_s == creature.id.to_s
           engage.retarget(creature)
-          last = engage.dispatch(world, command.strip.downcase, line)
+          last = engage.dispatch(world, engage.with_target(command.strip.downcase, creature), line)
         end
         engage.retarget(current)
         Actions::Target.new(world, target: current).call if current && world.me.current_target_id.to_s != current.id.to_s
