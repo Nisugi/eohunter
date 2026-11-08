@@ -92,6 +92,18 @@ RSpec.describe EO::Engine::Actions::Stand do
     room.title = '[Ooze, Innards]'
     expect(stand.call.reason).to eq(:in_ooze)
   end
+
+  # The loop broke on a failed ladder result and then rewrote it as
+  # :still_down, so an interrupt, a death or a resend limit all read as
+  # "still down".
+  it "keeps the ladder's own failure reason instead of :still_down" do
+    action = stand
+    allow(action).to receive(:send_and_observe)
+      .and_return(EO::Engine::Actions::Result.new(status: :failed, reason: :interrupted))
+    result = action.call
+    expect(result.status).to eq(:failed)
+    expect(result.reason).to eq(:interrupted)
+  end
 end
 
 RSpec.describe EO::Engine::Behaviors::Survival do
