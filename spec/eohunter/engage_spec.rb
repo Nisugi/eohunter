@@ -738,4 +738,19 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(engage.state.registry).to be_empty
     expect(engage.target).to be_nil
   end
+
+  # A stun between arbitration and the send: Attack refuses with :skipped
+  # and nothing reaches the game, so the line is still owed. Registering
+  # the skip suppressed `attack (once)` for the rest of the creature.
+  it 'does not count an unsent skip against once' do
+    policy.routines['a'] = ['attack (once)']
+    stunned = EO::Engine::Actions::Result.new(status: :skipped, reason: :stunned)
+    ok = EO::Engine::Actions::Result.new(status: :success)
+    attack = instance_double(EO::Engine::Actions::Attack)
+    allow(attack).to receive(:call).and_return(stunned, ok)
+    allow(EO::Engine::Actions::Attack).to receive(:new).and_return(attack)
+    expect(engage.tick(world)).to equal(stunned)
+    expect(engage.tick(world)).to equal(ok)
+    expect(engage.tick(world)).to have_attributes(status: :skipped, reason: :condition, line: 'once')
+  end
 end

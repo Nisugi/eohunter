@@ -1178,8 +1178,12 @@ module EO::Engine
           @state.combat_blocked_room = world.room.id
           Events.emit(:combat_blocked, room: world.room.id, target: @target&.id)
         end
-        unsent_preparation = named_preparation?(line.text) && result&.skipped?
-        @state.register(@target.id, line.raw, @clock.now) if result && !(result.failed? && result.reason == :condition) && !unsent_preparation
+        # Only a sent line is history. A :skipped result sent nothing (a
+        # stun between arbitration and the send, a coup not ready, a gate),
+        # and registering it burned a once/room/repeatdelay line that never
+        # ran: `attack (once)` under a stun was suppressed for the whole
+        # creature. The :condition failure is the same case from the far side.
+        @state.register(@target.id, line.raw, @clock.now) if result && !result.skipped? && !(result.failed? && result.reason == :condition)
         result
       end
 
