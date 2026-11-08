@@ -280,13 +280,17 @@ module EO::Engine
       # @return [void]
       def preempted!(_world) = EO::Engine::Travel.suspend(self)
 
-      # Nothing to fight here, or combat is blocked in this room.
+      # Nothing to fight here, combat is blocked in this room, or we are
+      # outside the area: Engage passes by a creature met out of bounds
+      # (engage.rb in_bounds?), so a creature here must not stop the walk
+      # home or nobody acts and the hunter stands still.
       #
       # @param world [World]
       # @return [Boolean]
       def wants_control?(world)
         note_room(world)
         return true if combat_blocked_here?(world)
+        return true if out_of_bounds?(world)
 
         !EO::Engine::Wander::Predicates.fight_here?(world, @targets_policy, @policy)
       end
@@ -395,6 +399,15 @@ module EO::Engine
           Events.emit(:coordination_return_required, reason: result.reason, room: world.room.id)
         end
         result
+      end
+
+      # The mirror of Engage#in_bounds?: outside the built area, unless a
+      # fight already under way here is still finishing.
+      def out_of_bounds?(world)
+        return false unless @area&.built?
+        return false if @state.fight_room && @state.fight_room.to_s == world.room.id.to_s
+
+        !@area.include?(world.room.id)
       end
 
       # nil == nil read as blocked in an unmapped room; see engage.rb.

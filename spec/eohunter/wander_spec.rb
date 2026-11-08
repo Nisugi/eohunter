@@ -285,6 +285,21 @@ RSpec.describe EO::Engine::Behaviors::Wander do
     expect(wander.tick(world)).to be_nil
   end
 
+  # Engage passes by a creature met out of bounds (in_bounds?); Wander
+  # declined control whenever a wanted creature was present. One creature
+  # in an out-of-bounds room and neither acted: the hunter stood still.
+  it 'wants control out of bounds even with something to fight, unless the fight began here' do
+    area = EO::Engine::Wander::Area.new(start: 1, boundaries: [9]).build(world)
+    home = described_class.new(policy: policy, targets_policy: EO::Engine::Targets::Policy.new, clock: clock, area: area,
+                               stance: ->(_s) { true }, travel: ->(r) { trips << r; true }, state: state)
+    room.targets = [OpenStruct.new(id: '1', name: 'kobold', noun: 'kobold', status: '', type: 'aggressive npc')]
+    expect(home.wants_control?(world)).to be false
+    room.id = 50
+    expect(home.wants_control?(world)).to be true
+    state.fight_room = 50
+    expect(home.wants_control?(world)).to be false
+  end
+
   it 'goes home when outside the area' do
     policy.wander_wait = 0
     area = EO::Engine::Wander::Area.new(start: 1, boundaries: [9]).build(world)
