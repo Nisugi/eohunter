@@ -197,15 +197,27 @@ RSpec.describe EO::Engine::Group::Leader do
   it 'does not accept a stale report made for the previous cycle' do
     hub.broadcast(:resting_prep, room: 1)
     cycle = hub.rest_prep_cycle
-    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle)) }
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: cycle)) }
     expect(leader.rest_prep_complete?).to be true
 
     order = hub.broadcast(:resting_prep, room: 1)
     expect(order.payload).to eq(cycle + 1)
-    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle)) }
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: cycle)) }
     expect(leader.rest_prep_complete?).to be false # last cycle's word, filed late
 
-    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: true, rest_prep_cycle: cycle + 1)) }
+    %w[Bob Ann].each { |n| hub.report(n, report(n, rest_prep_done: cycle + 1)) }
+    expect(leader.rest_prep_complete?).to be true
+  end
+
+  # The Report Struct is the DRb wire format: Marshal refuses a Struct of
+  # another size (TypeError, struct size differs) before any field could
+  # be read, so the cycle rides in rest_prep_done and the layout stays.
+  it 'keeps the Report layout a follower on the old build serializes' do
+    expect(EO::Engine::Group::Report.members).to eq(%i[name room rt hidden sneaky looting rest_prep_done rest_reason
+                                                       not_hunting_reason encumbrance_left wounded bounty at])
+    old = Marshal.load(Marshal.dump(report('Bob', rest_prep_done: true)))
+    hub.report('Bob', old)
+    hub.report('Ann', report('Ann', rest_prep_done: true))
     expect(leader.rest_prep_complete?).to be true
   end
 
@@ -599,7 +611,7 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(orders.rest_prep_done).to eq(hub.rest_prep_cycle) # done, for this cycle
     echoed = EO::Engine::Group.report(world, name: 'Bob', rest_policy: policy, counters: EO::Engine::Rest::Counters.new,
                                              rest_prep_done: orders.rest_prep_done)
-    expect([echoed.rest_prep_done, echoed.rest_prep_cycle]).to eq([true, hub.rest_prep_cycle])
+    expect(echoed.rest_prep_done).to eq(hub.rest_prep_cycle)
     scripts.run!('eloot')
     hub.broadcast(:hunting_scripts_stop, room: 1)
     run

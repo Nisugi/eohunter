@@ -215,10 +215,12 @@ module EO::Engine
     # @!attribute looting
     #   @return [Boolean] still looting
     # @!attribute rest_prep_done
-    #   @return [Boolean] the resting prep lists have run
-    # @!attribute rest_prep_cycle
-    #   @return [Integer, nil] the leader's :resting_prep cycle those lists ran for;
-    #     nil from a leader that named none
+    #   @return [Boolean, Integer] false until the resting prep lists have
+    #     run; then the leader's :resting_prep cycle they ran for, or true
+    #     from a follower whose order named none. The cycle rides in this
+    #     field because the Struct's layout is the DRb wire format: a
+    #     member added here is a TypeError (struct size differs) for every
+    #     follower still on the old layout.
     # @!attribute rest_reason
     #   @return [String, nil] why the follower wants to rest, or nil
     # @!attribute not_hunting_reason
@@ -232,7 +234,7 @@ module EO::Engine
     # @!attribute at
     #   @return [Time, nil] when the report was made; the Hub stamps a nil
     Report = Struct.new(:name, :room, :rt, :hidden, :sneaky, :looting, :rest_prep_done, :rest_reason,
-                        :not_hunting_reason, :encumbrance_left, :wounded, :bounty, :at, :rest_prep_cycle, keyword_init: true)
+                        :not_hunting_reason, :encumbrance_left, :wounded, :bounty, :at, keyword_init: true)
 
     # A member's bounty state for the report (the split plan's 3.1), from
     # Lich's Bounty task: :none, :hunting, :complete or :failed.
@@ -258,7 +260,7 @@ module EO::Engine
     # @param looting [Boolean] still looting
     # @param rest_prep_done [Boolean, Integer] the resting prep lists have
     #   run; Orders#rest_prep_done answers the :resting_prep cycle they ran
-    #   for, which the report carries as rest_prep_cycle
+    #   for, carried as is
     # @param bounty [Symbol, nil] :none, :hunting, :complete or :failed
     # @param forced [String, nil] a rest the follower's own events asked for
     #   (Rest#rest!: no fresh wands, ammo with no effect, a stuck maintain),
@@ -273,8 +275,7 @@ module EO::Engine
       overweight = encumbrance&.ready?(me.encumbrance_pct, threshold: rest_policy.encumbered_pct, looting: looting)
       Report.new(
         name: name, room: world.room.id, rt: me.in_rt? || me.in_cast_rt?, hidden: me.hidden?, sneaky: sneaky,
-        looting: looting, rest_prep_done: rest_prep_done ? true : false,
-        rest_prep_cycle: rest_prep_done.is_a?(Integer) ? rest_prep_done : nil,
+        looting: looting, rest_prep_done: rest_prep_done,
         rest_reason: Rest::Predicates.rest_reason(me, rest_policy, counters, forced: forced, looting: looting, encumbered: overweight),
         not_hunting_reason: Rest::Predicates.not_hunting_reason(me, rest_policy),
         encumbrance_left: rest_policy.encumbered_pct - me.encumbrance_pct.to_i,
@@ -1109,11 +1110,14 @@ module EO::Engine
       # is the signal the leader waits on before ending a rest.
       # @bigshot Bigshot::Group
       # @return [Boolean] true when every online follower's rest prep has run
-      #   for the current :resting_prep cycle (a report naming no cycle is
-      #   taken at its word)
+      #   for the current :resting_prep cycle (a bare true, from a follower
+      #   whose order named no cycle, is taken at its word)
       def rest_prep_complete?
         cycle = @hub.rest_prep_cycle
-        reports.values.all? { |r| r.rest_prep_done && (r.rest_prep_cycle.nil? || r.rest_prep_cycle == cycle) }
+        reports.values.all? do |r|
+          done = r.rest_prep_done
+          done && (!done.is_a?(Integer) || done == cycle)
+        end
       end
 
       # Moving now would leave a sneaky follower standing visible in the
