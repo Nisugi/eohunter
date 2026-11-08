@@ -248,7 +248,7 @@ overweight; the grace does not relax recovery thresholds.
 | `hunting_aim` | string | none | Loadout: the body part aimed at once when a loadout is established |
 | `hunting_loadout_sets` | mapping | {} | Named right/left/aim overrides of the default hunting hands |
 | `hunting_loadout_rules` | list | [] | Ordered target/type selectors for named sets; first match wins |
-| `signs` | split | none | Maintain: the signs, spells and symbols to keep up; `650 panther evoke` style entries work. First cast after the rally gather (or where you stand, with no rally rooms), before the trip to the hunting room; held for the walks |
+| `signs` | split | none | Maintain: the signs, spells and symbols to keep up; `650 panther evoke` style entries work. First cast after the rally gather (or where you stand, with no rally rooms), before the trip to the hunting room, unless the map tags that room no-magic; held for the walks |
 | `bless` | bool | false | Maintain: Voln's bless on the weapon |
 | `check_favor` | bool | false | Maintain: skip a symbol the favor cannot pay for |
 | `priority` | bool | false | Engage: the first target in the profile's order rather than the nearest |

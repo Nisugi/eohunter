@@ -201,6 +201,15 @@ RSpec.describe EO::Engine::Behaviors::Rest do
       expect(trips).to eq([200])
     end
 
+    it 'does not cast in a room the map tags no-magic, and moves on' do
+      world.room = OpenStruct.new(id: 3, tags: ['meta:nomagic'])
+      due << '401'
+      rest.start!
+      run_until(:hunting_scripts_own)
+      expect(casts).to be_empty
+      expect(due).to eq(['401']) # still due; the arrival cast takes it
+    end
+
     it 'moves straight on when nothing is due' do
       rest.start!
       run_until(:hunting_scripts_own)

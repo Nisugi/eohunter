@@ -1168,6 +1168,17 @@ module EO::Engine
         hold(world, :before_rally, next_phase: :rally, follow: true) { @group.all_present?(world) }
       end
 
+      # The map's no-magic tags, in both spellings it carries.
+      NOMAGIC_TAGS = %w[meta:nomagic no-magic].freeze
+
+      # @return [Boolean] the map says nothing can be cast here
+      def nomagic?(world)
+        room = world.room
+        return false unless room.respond_to?(:tags)
+
+        Array(room.tags).any? { |tag| NOMAGIC_TAGS.include?(tag.to_s) }
+      end
+
       # Verify required effects after safe-location work, not merely that a
       # spell-up script exited. Initial departures also get one recovery pass.
       # Failure holds at refuge through the existing service-failed event.
@@ -1222,10 +1233,18 @@ module EO::Engine
       # same time, since signs_phase? is true in this step and the leader
       # publishes it, and bigshot's wait_while roundtime? is the hold on
       # them. Then the scripts, and an independent group's own trip.
+      #
+      # In a room the map tags as no-magic (a town's inner rooms, the
+      # Landing's wells) nothing can be cast, so the step moves on at
+      # once and the signs land on arrival at the hunting room instead.
       def step_signs(world)
-        result = @cast_signs&.call(world)
-        return result if result
-        return Actions::Result.new(status: :skipped, reason: :followers_casting) if grouped? && @group.roundtime?
+        if nomagic?(world)
+          Events.emit(:signs_held, room: world.room.id, reason: :nomagic)
+        else
+          result = @cast_signs&.call(world)
+          return result if result
+          return Actions::Result.new(status: :skipped, reason: :followers_casting) if grouped? && @group.roundtime?
+        end
 
         if grouped?
           @group.order(:hunting_scripts_start, room: world.room.id)
