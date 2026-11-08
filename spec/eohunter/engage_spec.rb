@@ -855,13 +855,30 @@ RSpec.describe EO::Engine::Behaviors::Engage do
       end
     end
 
+    # A child that will not die keeps sending whatever the engine does
+    # next, so the line's failure is fatal: the runner stops on it at
+    # once instead of counting it toward the five.
     context 'when the killed child never stops' do
       let(:scripts) { EngageScripts.new(linger: 1_000) }
 
-      it 'fails the line as stuck after the bounded wait' do
-        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot')
+      it 'fails the line as stuck, fatally, after the bounded wait' do
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
         expect(slept.last).to eq(0.1)
         expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_TIMEOUT + EO::Engine::Behaviors::Engage::SCRIPT_STOP_WAIT)
+      end
+
+      it 'is stuck, not interrupted, when the stop on interruption fails' do
+        allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+        allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
+        expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_STOP_WAIT)
+      end
+
+      it 'does not start a second instance over a first that will not stop' do
+        scripts.start('bigloot', nil)
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot', fatal?: true)
+        expect(scripts.started.size).to eq(1)
+        expect(scripts.killed).to eq(['bigloot'])
       end
     end
   end

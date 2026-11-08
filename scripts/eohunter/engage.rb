@@ -1536,22 +1536,31 @@ module EO::Engine
       # running at the deadline is killed and the line failed: left alone
       # it kept running under the next line, and the line read :success.
       def run_script(name, args)
-        stop_script(name) if @scripts.running?(name)
+        return script_stuck(name) if @scripts.running?(name) && !stop_script(name)
+
         @scripts.start(name, args.to_s.empty? ? nil : args)
         deadline = @clock.now + SCRIPT_TIMEOUT
         while @scripts.running?(name)
           if Actions::Base.respond_to?(:interrupt) && Actions::Base.interrupt&.call
-            stop_script(name)
+            return script_stuck(name) unless stop_script(name)
+
             return Actions::Result.new(status: :skipped, reason: :interrupted)
           end
           if @clock.now >= deadline
-            # A child that will not stop is still on the wire: the line
-            # fails on that, not on the timeout, so the stop names it.
-            return Actions::Result.new(status: :failed, reason: stop_script(name) ? :timeout : :script_stuck, line: name)
+            return script_stuck(name) unless stop_script(name)
+
+            return Actions::Result.new(status: :failed, reason: :timeout, line: name)
           end
           sleep 0.25
         end
         Actions::Result.new(status: :success, reason: :script_ran)
+      end
+
+      # A child that would not stop is still on the wire, whatever the
+      # engine does next, so this is not one failure among five: the
+      # runner stops on it at once, naming the script.
+      def script_stuck(name)
+        Actions::Result.new(status: :failed, reason: :script_stuck, line: name, fatal: true)
       end
 
       # Kill the child and wait, bounded, until it has actually stopped.
