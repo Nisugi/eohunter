@@ -413,6 +413,16 @@ RSpec.describe EO::Engine::Behaviors::Flee do
     expect(flee.wants_control?(world)).to be false
   end
 
+  # ...but a message that lands in the new room before the tick that
+  # notices the move is this room's warning, and must not be dropped.
+  it 'keeps a flee message seen in the new room before the room change is noticed' do
+    expect(flee.wants_control?(world)).to be false
+    room.id = 2
+    EO::Engine::Events.emit(:flee_message, raw: 'x')
+    expect(flee.wants_control?(world)).to be true
+    expect(flee.reason).to eq(:message)
+  end
+
   it 'does not seize movement from a supervised go2 trip in a hazardous transit room' do
     policy.clouds = true
     scripts = Class.new do
