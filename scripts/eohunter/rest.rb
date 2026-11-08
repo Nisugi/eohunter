@@ -554,7 +554,10 @@ module EO::Engine
       # trip; it resumes with the next step.
       # @param _world [World] unused
       # @return [void]
-      def preempted!(_world) = EO::Engine::Travel.suspend(self)
+      def preempted!(_world)
+        EO::Engine::Travel.suspend(self)
+        stop_final_loot!
+      end
 
       # While resting, always; while hunting, when rest_reason (ours joined
       # with the followers' when grouped) names a reason.
@@ -809,8 +812,17 @@ module EO::Engine
         end
 
         Events.emit(:final_loot_done, ticks: @final_loot_ticks - 1)
+        stop_final_loot!
         @phase = grouped? ? :wait_followers : :leave
         nil
+      end
+
+      # Loot's ticks come from here, so Loot never owns the turn and its
+      # preempted! never runs: a loot script it started kept LOOTing while
+      # we walked home. Kill it at the end of the final loot, and when
+      # another behavior takes the tick during one.
+      def stop_final_loot!
+        @loot.cancel! if @phase == :final_loot && @loot.respond_to?(:cancel!)
       end
 
       # rest 7481-7484: the followers done looting and out of roundtime.

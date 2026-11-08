@@ -512,10 +512,11 @@ RSpec.describe EO::Engine::Behaviors::Rest do
   describe 'the final loot' do
     let(:loot) do
       Class.new do
-        attr_reader :final, :ticks
+        attr_reader :final, :ticks, :cancelled
 
         def initialize(wants) = (@wants = wants; @ticks = 0; @final = false)
         def final! = @final = true
+        def cancel! = @cancelled = true
         def looting? = false
         def wants_control?(_w) = @wants.positive?
         def tick(_w) = (@wants -= 1; @ticks += 1; EO::Engine::Actions::Result.new(status: :success))
@@ -541,6 +542,21 @@ RSpec.describe EO::Engine::Behaviors::Rest do
         with_loot.tick(world)
         expect(with_loot.phase).to eq(:leave)
         expect(looter.ticks).to eq(2)
+        expect(looter.cancelled).to be true
+      end
+
+      # Rest calls Loot's ticks itself, so Loot never owns the turn and its
+      # preempted! never runs: a loot script it started kept LOOTing while
+      # Survival took the tick, and all the way home.
+      it 'ends the delegated loot when another behavior takes the tick during it' do
+        me.mana_pct = 10
+        with_loot.wants_control?(world)
+        with_loot.preempted!(world) # not looting yet: nothing to end
+        expect(looter.cancelled).to be_nil
+        with_loot.tick(world) # begin
+        expect(with_loot.phase).to eq(:final_loot)
+        with_loot.preempted!(world)
+        expect(looter.cancelled).to be true
       end
 
       it 'skips the loot for a wounded rest or one outside bigshot\'s reasons' do
@@ -570,6 +586,8 @@ RSpec.describe EO::Engine::Behaviors::Rest do
         (described_class::FINAL_LOOT_TICKS + 1).times { with_loot.tick(world) }
         expect(with_loot.phase).to eq(:leave)
         expect(looter.ticks).to eq(described_class::FINAL_LOOT_TICKS)
+        # its loot script does not walk home with us
+        expect(looter.cancelled).to be true
       end
     end
   end
