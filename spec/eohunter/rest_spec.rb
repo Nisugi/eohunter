@@ -344,6 +344,20 @@ RSpec.describe EO::Engine::Behaviors::Rest do
     expect(scripts.started).to eq([['eherbs', nil], ['eloot', 'sell']])
   end
 
+  # Profile#split_xx turns "stance defensive and ready weapon" into an
+  # Array entry; step_prep took each entry for a String and =~ on an Array
+  # is a NoMethodError. The hunting prep, the resting commands and a custom
+  # fog all go through here.
+  it 'runs an "a and b" prep entry as two commands, one per tick' do
+    sent = []
+    allow_any_instance_of(EO::Engine::Actions::Command).to receive(:send_through_ladder) { |_a, cmd| sent << cmd; 'ok' }
+    commands = [['stance defensive', 'ready weapon'], 'stand']
+    3.times { expect { rest.send(:step_prep, world, commands, [], :rested) }.not_to raise_error }
+    expect(sent).to eq(['stance defensive', 'ready weapon', 'stand'])
+    rest.send(:step_prep, world, commands, [], :rested)
+    expect(rest.phase).to eq(:rested)
+  end
+
   it 'polls resting readiness without blocking engine heartbeat ticks' do
     clock = OpenStruct.new(now: Time.at(1000))
     policy.rest_interval = 30
