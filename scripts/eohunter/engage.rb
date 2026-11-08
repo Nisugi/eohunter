@@ -1027,9 +1027,13 @@ module EO::Engine
           return Actions::Result.new(status: :skipped, reason: :loadout_target_changed)
         end
         creature = selected
-        return Actions::Result.new(status: :failed, reason: :no_target) if creature.nil?
+        if creature.nil?
+          disengage(world, :no_target) if @target && @target.status.to_s =~ /dead|gone/
+          return Actions::Result.new(status: :failed, reason: :no_target)
+        end
 
         if creature != @target
+          disengage(world, :switched) if @target
           switch_to(creature, world)
           probe = ensure_targeted(world)
           return probe if probe && !probe.success?
@@ -1086,6 +1090,9 @@ module EO::Engine
       # quick mode; disable_commands for a fried member of a group.
       def switch_to(creature, world)
         @target = creature
+        @engaged_at = @clock.now
+        @commands = 0
+        @disengaged = nil
         @state.fight_room = world.room.id
         letter = @policy.quick ? 'quick' : Targets.routine_for(creature, @targets_policy)
         letter = @routine_selector.call(creature, letter) if @routine_selector
@@ -1101,6 +1108,24 @@ module EO::Engine
         @ambush_cursor = 0
         Events.emit(:engaged, target: creature.id, name: creature.name, routine: letter)
         order_attack(world)
+      end
+
+      # The end of a fight, for the trace: how long it took and how many
+      # routine lines went to the game, with the creature's last status
+      # (dead, gone, or still up when the arbiter switched away). Once per
+      # target; a dead target stays @target until the room changes, and
+      # every tick after would otherwise say it again.
+      #
+      # @param world [World]
+      # @param why [Symbol] :switched or :no_target
+      # @return [void]
+      def disengage(world, why)
+        return if @target.nil? || @disengaged == @target.id.to_s
+
+        @disengaged = @target.id.to_s
+        Events.emit(:disengaged, target: @target.id.to_s, name: @target.name.to_s, status: @target.status.to_s,
+                                 why: why, engaged_for: @engaged_at ? (@clock.now - @engaged_at).round(1) : nil,
+                                 commands: @commands.to_i, hp: EO::Engine::Engage::Conditions.creature_of(world, @target)&.hp_percent)
       end
 
       def order_attack(world)
@@ -1177,20 +1202,22 @@ module EO::Engine
           reaction(world)
           @stance.call(@policy.hunting_stance) if @policy.hunting_stance && text !~ STANCE_FREE
         end
-        if @routine_selector
-          before = action_resources(world)
-          Events.emit(:routine_action_started, target: @target.id.to_s, name: @target.name.to_s,
-                                               routine: @routine_letter,
-                                               command: line.raw.to_s, resources: before)
-          result = dispatch(world, text, line)
-          Events.emit(:routine_action_resolved, target: @target.id.to_s, name: @target.name.to_s,
-                                                routine: @routine_letter,
-                                                command: line.raw.to_s, status: result&.status,
-                                                reason: result&.reason, line: result&.line.to_s,
-                                                resources_before: before, resources_after: action_resources(world))
-        else
-          result = dispatch(world, text, line)
-        end
+        # The two action events bracket every routine line on every hunt:
+        # the controller's trials read the resolved one, and the debug
+        # trace prints both with the creature's health and status, which
+        # is bigshot's engage-to-death trail for one creature.
+        before = action_resources(world)
+        Events.emit(:routine_action_started, target: @target.id.to_s, name: @target.name.to_s,
+                                             routine: @routine_letter,
+                                             command: line.raw.to_s, resources: before, **target_state(world))
+        result = dispatch(world, text, line)
+        @commands = @commands.to_i + 1 if result && !result.skipped?
+        Events.emit(:routine_action_resolved, target: @target.id.to_s, name: @target.name.to_s,
+                                              routine: @routine_letter,
+                                              command: line.raw.to_s, status: result&.status,
+                                              reason: result&.reason, line: result&.line.to_s,
+                                              resources_before: before, resources_after: action_resources(world),
+                                              **target_state(world))
         if result&.failed? && result.reason == :blocked
           @state.combat_blocked_room = world.room.id
           Events.emit(:combat_blocked, room: world.room.id, target: @target&.id)
@@ -1206,6 +1233,15 @@ module EO::Engine
 
       def named_preparation?(text)
         @policy.preparations && !@policy.preparations.empty? && !Preparations.name(text).nil?
+      end
+
+      # The target's health and status for the action events; nil health
+      # when Lich has no creature record for it.
+      #
+      # @param world [World]
+      # @return [Hash{Symbol => Object}] :hp and :status
+      def target_state(world)
+        { hp: EO::Engine::Engage::Conditions.creature_of(world, @target)&.hp_percent, status: @target&.status.to_s }
       end
 
       def action_resources(world)

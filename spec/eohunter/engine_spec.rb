@@ -115,6 +115,17 @@ RSpec.describe EO::Engine::Engine do
     expect(tripped.first).to include(kind: :fatal_action, count: 1, reason: :script_stuck, line: 'bigloot')
   end
 
+  it 'keeps the last result and the behaviors for the trace' do
+    acting = behavior(priority: 0, wants: true, result: EO::Engine::Actions::Result.new(status: :success, reason: :swung))
+    engine = described_class.new(world: world, behaviors: [acting, behavior(priority: 10, wants: false)], interval: 0)
+    engine.tick
+    expect(engine.last_result).to have_attributes(status: :success, reason: :swung)
+    expect(engine.behaviors.first).to equal(acting)
+    allow(acting).to receive(:wants_control?).and_return(false)
+    engine.tick
+    expect(engine.last_result).to be_nil
+  end
+
   it 'resets the failure count on success' do
     results = [
       EO::Engine::Actions::Result.new(status: :timeout),

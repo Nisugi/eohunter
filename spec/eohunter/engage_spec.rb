@@ -354,6 +354,40 @@ RSpec.describe EO::Engine::Behaviors::Engage do
   # the same reset but only called it on a new room or a bolt, so the
   # unarmed tier, the armed follow-up, the aim indices, the dislodge state
   # and a pending weapon reaction carried over from the creature that died.
+  # The trace's engage-to-death trail: every routine line is bracketed by
+  # the two action events (on every hunt, not only a controlled one), each
+  # carrying the creature's health and status, and the fight ends with a
+  # disengaged line saying how long and how many commands it took.
+  it 'narrates the fight for the trace, and reports the end of it once' do
+    seen = []
+    EO::Engine::Events.on(:routine_action_started, :routine_action_resolved, :disengaged) { |e| seen << [e.type, e.data] }
+    kobold = room.targets.first
+    engage.tick(world) # targets kobold 1 and runs the first line
+    expect(seen.map(&:first)).to eq(%i[routine_action_started routine_action_resolved])
+    expect(seen[0].last).to include(target: '1', command: 'attack', status: '', hp: nil)
+    expect(seen[1].last).to include(target: '1', command: 'attack', status: '')
+
+    kobold.status = 'dead'
+    room.targets = [] # a corpse leaves the live roster
+    engage.tick(world)
+    engage.tick(world)
+    gone = seen.select { |t, _| t == :disengaged }
+    expect(gone.size).to eq(1)
+    expect(gone.first.last).to include(target: '1', name: 'kobold', status: 'dead', why: :no_target, commands: 1)
+    expect(gone.first.last[:engaged_for]).to be_a(Numeric)
+  end
+
+  it 'reports a target left alive when the arbiter switches away' do
+    gone = []
+    EO::Engine::Events.on(:disengaged) { |e| gone << e.data }
+    engage.tick(world)
+    room.targets.reverse!
+    tp.wanted['orc'] = 'b'
+    allow(EO::Engine::Targets).to receive(:choose).and_return(room.targets.first)
+    engage.tick(world)
+    expect(gone.map { |d| d.values_at(:target, :why) }).to eq([['1', :switched]])
+  end
+
   it 'resets the per-target routine state when the target changes' do
     engage.state.unarmed_tier = 3
     engage.state.unarmed_followup = true
