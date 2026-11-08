@@ -1184,7 +1184,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(rest.phase).to eq(:hunting_prep)
   end
 
-  it 'preps the followers first, gathers before the rally, starts scripts together, and holds at the hunting room for signs and sneaks' do
+  it 'preps the followers first, gathers before the rally, casts signs together, starts scripts, and holds at the hunting room for signs and sneaks' do
     rest.start!
     rest.tick(world)
     expect(orders_sent).to eq([:hunting_prep])
@@ -1194,7 +1194,15 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     run_until(:hunting_scripts)
     hub.take_orders('Bob') # the gathers' follow_nows
     rest.tick(world)
-    expect(orders_sent).to eq(%i[follow_now hunting_scripts_start])
+    expect(orders_sent).to eq(%i[follow_now])
+    expect(rest.phase).to eq(:signs) # the leader publishes signs_phase? from here
+    expect(rest.signs_phase?).to be true
+    hub.report('Bob', report('Bob', rt: true)) # Bob is casting his
+    rest.tick(world)
+    expect(rest.phase).to eq(:signs)
+    hub.report('Bob', report('Bob'))
+    rest.tick(world)
+    expect(orders_sent).to eq(%i[hunting_scripts_start])
     expect(rest.phase).to eq(:hunting_scripts_own)
     run_until(:arrived)
     hub.report('Bob', report('Bob', sneaky: true, hidden: false))
@@ -1237,6 +1245,8 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(orders_sent).to eq([:follow_now]) # 7281: the followers rejoin at the rally room
     expect(rest.phase).to eq(:hold)
     world[:group_nouns] = ['Bob']
+    rest.tick(world)
+    expect(rest.phase).to eq(:signs)
     rest.tick(world)
     expect(orders_sent).to eq(%i[hunting_scripts_start go2_hunting_room])
     expect(rest.phase).to eq(:hunting_scripts_own)

@@ -149,8 +149,8 @@ RSpec.describe EO::Engine::Behaviors::Rest, '#signs_phase?' do
 
   def phase!(name) = rest.instance_variable_set(:@phase, name)
 
-  it 'wants signs at the hunting room and while hunting' do
-    %i[arrived done hunting].each do |phase|
+  it 'wants signs at the signs step, at the hunting room and while hunting' do
+    %i[signs arrived done hunting].each do |phase|
       phase!(phase)
       expect(rest.signs_phase?).to be(true), "expected #{phase} to want signs"
     end

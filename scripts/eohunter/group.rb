@@ -1928,8 +1928,9 @@ module EO::Engine
       # @return [Boolean] true while the leader's phase is :resting
       def resting? = @member.leader_phase == :resting
 
-      # What Maintain gates on: the leader is at the hunting room, so
-      # signs are wanted. Held for the refuge and both walks.
+      # What Maintain gates on: the leader is casting its own signs after
+      # the rally gather, or is at the hunting room, so signs are wanted.
+      # Held for the refuge and both walks.
       # @return [Boolean]
       def signs_wanted? = @member.leader_signs_wanted?
 

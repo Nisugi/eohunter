@@ -336,7 +336,7 @@ module EO::Engine
     # one step per tick so pause and stop land between steps:
     #
     #   final_loot -> wait_followers -> leave -> fog -> waypoints -> resting_room
-    #   -> resting_prep -> resting -> hunting_prep -> rally -> hunting_room -> done
+    #   -> resting_prep -> resting -> hunting_prep -> rally -> signs -> hunting_room -> done
     #
     # The final loot (should_rest? 9041) is Rest's own phase: Rest outranks
     # Loot, so a request left for Loot to pick up would never get a tick
@@ -367,14 +367,14 @@ module EO::Engine
       # Seconds between follow_now orders while holding for followers
       REORDER = 10
       # Departure phases are outside the field recovery timeout.
-      DEPARTURE_PHASES = %i[hunting_prep hunting_prep_own rally_out rally hunting_scripts hunting_scripts_own hunting_room arrived done].freeze
+      DEPARTURE_PHASES = %i[hunting_prep hunting_prep_own rally_out rally hunting_scripts signs hunting_scripts_own hunting_room arrived done].freeze
       # Ticks to wait for the game's group to empty after DISBAND
       DISBAND_TICKS = 40
       # Phases moving from a refuge toward the hunting area. A new rest
       # condition in any of these aborts the outbound lifecycle.
       OUTBOUND_PHASES = %i[
         hunting_prep hunting_prep_own rally_out rally hunting_scripts
-        hunting_scripts_own hunting_room arrived done
+        signs hunting_scripts_own hunting_room arrived done
       ].freeze
 
       # The cycle's current step; :hunting between rests.
@@ -399,6 +399,13 @@ module EO::Engine
       # Only outbound Rest steps invoke it; go2 retains travel ownership.
       # @return [#call, nil] (World) -> Actions::Result or nil
       attr_writer :prepare_hands
+
+      # Maintain's turn, lent to the :signs step: one due sign, bless or
+      # buff per call, nil once nothing is due. Rest outranks Maintain and
+      # holds control for the whole departure, so without this the first
+      # cast would land on the first hunting tick, in the hunting room.
+      # @return [#call, nil] (World) -> Actions::Result or nil
+      attr_writer :cast_signs
 
       # @param policy [Rest::Policy]
       # @param counters [Rest::Counters]
@@ -511,12 +518,15 @@ module EO::Engine
       # @return [Boolean]
       def resting? = @phase != :hunting
 
-      # The phases where signs belong: standing in the hunting room, and
-      # hunting from it. bigshot's pre_hunt casts them at the hunting room
-      # (7315-7341), and Rest's :arrived issues the cast_signs group order
-      # there. Everything else - the refuge wait, the trip home, the trip
-      # back out - is either parked or travelling, and a sign cast then
-      # burns for the whole walk and dissipates before the first fight.
+      # The phases where signs belong: the :signs step before the trip to
+      # the hunting room, standing in the hunting room, and hunting from
+      # it. bigshot's pre_hunt casts them twice: prepare_for_movement()
+      # after the gather at the last rally room (7281), before the hunting
+      # scripts and the goto, and again on arrival (7315-7341) through the
+      # CAST_SIGNS order. With no rally rooms the first cast lands where
+      # we stand. Everything else - the refuge wait, the trip home, the
+      # rally trip - is parked or travelling, and a sign cast then burns
+      # for the walk and dissipates before the first fight.
       #
       # Anything wanted earlier goes in the hunting prep commands, which
       # are sent to the game verbatim, the way bigshot does it.
@@ -524,7 +534,7 @@ module EO::Engine
       # steps, including the disband and the rally on the way out. Only
       # the one that lands at the hunting room counts, so it is tested
       # through the hold's own destination rather than the phase.
-      SIGNS_PHASES = %i[arrived done hunting].freeze
+      SIGNS_PHASES = %i[signs arrived done hunting].freeze
 
       # Whether signs are wanted now, as opposed to held for the walk.
       # @return [Boolean]
@@ -626,6 +636,7 @@ module EO::Engine
         when :rally_out then step_rally_out(world)
         when :rally then step_travel(world, @policy.rally_room_ids, :hunting_scripts)
         when :hunting_scripts then step_hunting_scripts(world)
+        when :signs then step_signs(world)
         when :hunting_scripts_own then step_prep(world, [], @policy.hunting_script_list, :hunting_room)
         when :hunting_room then prepare_departure(world) || step_room(world, @policy.hunting_room, :arrived)
         when :arrived then step_arrived(world)
@@ -1192,17 +1203,36 @@ module EO::Engine
         result
       end
 
-      # pre_hunt 7281-7297: group open, everyone here, then the scripts.
+      # pre_hunt 7281-7290: group open, everyone here, then the signs.
       def step_hunting_scripts(world)
         @remaining = nil
         unless grouped?
-          @phase = :hunting_scripts_own
+          @phase = :signs
           return nil
         end
         Actions::GroupOpen.new(world).call
-        after = [:hunting_scripts_start]
-        after << :go2_hunting_room if @group.policy.independent_travel
-        hold(world, :before_scripts, next_phase: :hunting_scripts_own, follow: true, after: after) { @group.all_present?(world) }
+        hold(world, :before_scripts, next_phase: :signs, follow: true) { @group.all_present?(world) }
+      end
+
+      # pre_hunt 7291-7297, prepare_for_movement(): the signs, here, after
+      # everyone has gathered and before the hunting scripts and the trip
+      # to the hunting room. With no rally rooms "here" is wherever the
+      # rest ended, or where the hunt was started. One due thing a tick
+      # through Maintain's lent turn; the followers cast their own at the
+      # same time, since signs_phase? is true in this step and the leader
+      # publishes it, and bigshot's wait_while roundtime? is the hold on
+      # them. Then the scripts, and an independent group's own trip.
+      def step_signs(world)
+        result = @cast_signs&.call(world)
+        return result if result
+        return Actions::Result.new(status: :skipped, reason: :followers_casting) if grouped? && @group.roundtime?
+
+        if grouped?
+          @group.order(:hunting_scripts_start, room: world.room.id)
+          @group.order(:go2_hunting_room, room: world.room.id) if @group.policy.independent_travel
+        end
+        @phase = :hunting_scripts_own
+        nil
       end
 
       # pre_hunt 7315-7341: at the hunting room, group open, everyone here,
