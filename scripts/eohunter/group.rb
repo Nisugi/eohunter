@@ -296,6 +296,7 @@ module EO::Engine
       REPORT_STALE = 10 # a follower silent this long is offline
       # Seconds the leader may be silent before it is lost.
       HEARTBEAT_STALE = 15 # a leader silent this long is lost
+      LOOT_CONFIRM = 10 # seconds a loot order counts as looting before the looter has said so
       # Seconds between liveness pulses, well inside both stale limits.
       PULSE = 3 # the liveness pulse, well inside both
 
@@ -339,6 +340,7 @@ module EO::Engine
         @reports = {}
         @acks = {}
         @rest_prep_cycle = 0
+        @loot_pending = {}
         @active = false
         @leader_state = {}
         @heartbeat = nil
@@ -371,6 +373,7 @@ module EO::Engine
           @reports = {}
           @acks = {}
           @rest_prep_cycle = 0
+          @loot_pending = {}
           @active = false
           @leader_state = {}
           @heartbeat = @clock.now
@@ -477,6 +480,9 @@ module EO::Engine
           end
           order = make_order(type, payload, room)
           @queues.each_value { |q| q << order }
+          # The leader's Loot assigns the room this way: a :loot broadcast
+          # naming the looter in its payload (Loot#tick -> Leader#order).
+          loot_assigned(payload) if type == :loot
           order
         end
       end
@@ -497,8 +503,25 @@ module EO::Engine
       # @raise [ArgumentError] for a type not in ORDERS
       def order(name, type, payload = nil, room: nil)
         order = make_order(type, payload, room)
-        @mutex.synchronize { (@queues[name.to_s] ||= []) << order }
+        @mutex.synchronize do
+          (@queues[name.to_s] ||= []) << order
+          loot_assigned(name) if type == :loot
+        end
         order
+      end
+
+      # The looter is looting from the moment a loot order names it: its
+      # own report says so only once it has taken the order and ticked,
+      # and until then the last report (republished by the heartbeat)
+      # still says false, which read as done. Called under the mutex.
+      #
+      # @param name [String, Symbol, nil] the looter the order names
+      # @return [void]
+      def loot_assigned(name)
+        return if name.nil? || name.to_s.empty?
+
+        @loot_pending[name.to_s] = @clock.now
+        @reports[name.to_s]&.looting = true
       end
 
       # Whether an order of this type is still queued for the follower.
@@ -585,6 +608,14 @@ module EO::Engine
       def report(name, report)
         report.at ||= @clock.now
         @mutex.synchronize do
+          pending = @loot_pending[name.to_s]
+          if pending
+            if report.looting || (report.at.to_f - pending.to_f) >= LOOT_CONFIRM
+              @loot_pending.delete(name.to_s) # confirmed, or never going to be
+            else
+              report.looting = true # a report from before the order
+            end
+          end
           @reports[name.to_s] = report
           @leader_state.dup
         end
@@ -1709,6 +1740,13 @@ module EO::Engine
       # Seconds between repeated follow_now calls to a missing follower.
       REORDER = 10
 
+      # Why the hold, from the last wants_control?: :member_stunned,
+      # :member_roundtime, :follower_missing, :followers_looting,
+      # :prepare_movement or :movement_barrier; nil when not holding.
+      #
+      # @return [Symbol, nil]
+      attr_reader :reason
+
       # @param leader [Group::Leader] the leader's view of the Hub
       # @param resting [#call] -> Boolean, true while the leader is resting
       # @param fight [#call] (world) -> Boolean, true while a fight is on
@@ -1755,6 +1793,11 @@ module EO::Engine
                   elsif @leader.roundtime? then :member_roundtime
                   elsif !@leader.all_present?(world) then :follower_missing
                   elsif strict_movement? then strict_reason(world)
+                  # The assigned looter's Loot runs below Orders, so its
+                  # legacy prepare_move ack comes before it has started;
+                  # left to the ack alone the leader walks off the corpses.
+                  # (A strict follower refuses to prepare while looting.)
+                  elsif !@leader.looting_done? then :followers_looting
                   elsif !@movement_requested then :prepare_movement
                   elsif !@movement_ready then :movement_barrier
                   end
@@ -1768,7 +1811,7 @@ module EO::Engine
       # @param world [World]
       # @return [Actions::Result, nil] the step's result, nil when only waiting
       def tick(world)
-        return nil if %i[member_stunned member_roundtime].include?(@reason)
+        return nil if %i[member_stunned member_roundtime followers_looting].include?(@reason)
         if @reason == :prepare_movement
           if strict_movement?
             return nil unless @leader.prepare_movement(world.room.id, room_epoch: world.room.count)

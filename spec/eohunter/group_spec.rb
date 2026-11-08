@@ -941,6 +941,58 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.wants_control?(world)).to be false
   end
 
+  # The looter's Loot runs below Orders: it acks prepare_move before it
+  # has started looting, and the leader used to walk off the corpses.
+  it 'holds while a follower is still looting, then moves on' do
+    hub.report('Bob', report('Bob', looting: true))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    expect(muster.tick(world)).to be_nil
+    expect(hub.take_orders('Bob')).to be_empty
+
+    hub.report('Bob', report('Bob', looting: false))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:prepare_movement)
+    acknowledge_movement
+    hub.report('Bob', report('Bob', looting: true)) # a late loot assignment holds again
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    hub.report('Bob', report('Bob', looting: false))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:movement_ready)
+    expect(muster.wants_control?(world)).to be false
+  end
+
+  # The assignment itself is the hold: the looter's report says looting
+  # only after it has taken the order and ticked, and the heartbeat kept
+  # republishing the earlier false in between.
+  it 'holds from the loot assignment, through stale reports, until the looter is done' do
+    hub.report('Bob', report('Bob', looting: false))
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:prepare_movement)
+    acknowledge_movement
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.tick(world).reason).to eq(:movement_ready)
+    expect(muster.wants_control?(world)).to be false
+
+    hub.order('Bob', :loot, room: 1) # the leader's Loot hands over the corpses
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # the heartbeat's copy of the old report
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: true, at: nil)) # taken and started
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # done
+    expect(leader.looting_done?).to be true
+    expect(muster.wants_control?(world)).to be false
+  end
+
+  it 'stops holding on a loot assignment the looter never confirms' do
+    hub.order('Bob', :loot, room: 1)
+    hub.report('Bob', report('Bob', looting: false, at: Time.now + EO::Engine::Group::Hub::LOOT_CONFIRM))
+    expect(leader.looting_done?).to be true
+  end
+
   it 'calls a missing follower back, once every ten seconds' do
     room.players = []
     expect(muster.wants_control?(world)).to be true
@@ -1233,6 +1285,30 @@ RSpec.describe EO::Engine::Behaviors::Loot, 'with a group' do
     expect(loot.wants_control?(world)).to be false
     hub.report('Bob', report('Bob'))
     expect(loot.wants_control?(world)).to be false # that corpse is theirs
+  end
+
+  # The assignment goes out as a broadcast naming the looter, and the
+  # leader's Muster must hold on it before Bob's own report says looting.
+  it 'holds the leader from the assignment until the looter reports done' do
+    me[:webbed?] = false; me[:sleeping?] = false; me[:stunned?] = false; me[:hidden?] = false
+    room.players = [player('Bob')]
+    world[:group_nouns] = ['Bob']
+    loot = described_class.new(policy: policy, targets_policy: tp, group: leader)
+    muster = EO::Engine::Behaviors::Muster.new(leader: leader, resting: -> { false }, fight: ->(_w) { false }, clock: OpenStruct.new(now: Time.at(1000)))
+    expect(leader.looting_done?).to be true
+
+    expect(loot.tick(world).reason).to eq(:loot_assigned)
+    expect(leader.looting_done?).to be false
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:followers_looting)
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # the heartbeat's copy of the old report
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: true, at: nil)) # taken and started
+    expect(leader.looting_done?).to be false
+    hub.report('Bob', report('Bob', looting: false, at: nil)) # done
+    expect(leader.looting_done?).to be true
+    expect(muster.wants_control?(world)).to be true # on to preparing the move
+    expect(muster.reason).not_to eq(:followers_looting)
   end
 
   it 'loots itself when it is the looter, telling the followers to count the kill' do
