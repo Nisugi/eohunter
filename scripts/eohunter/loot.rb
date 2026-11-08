@@ -318,15 +318,25 @@ module EO::Engine
           # three of them under a single stun used to mark the corpse
           # looted and skip it for the rest of the visit, box and all;
           # bigshot's bs_put waits the stun out and loots afterwards.
+          #
+          # acted? is not an answer: a LOOT that timed out or was refused
+          # by the ladder also went on the wire, and marking on it skipped
+          # the retry the attempt counter is there for.
           id = corpse.id.to_s
           @attempts[id] += 1 unless result.skipped?
-          @looted << id if result.success? || result.acted? || @attempts[id] >= LOOT_ATTEMPTS
+          @looted << id if terminal?(result) || @attempts[id] >= LOOT_ATTEMPTS
           loot_room(world) if result.success?
           result
         end
       end
 
       private
+
+      # The game answered the LOOT (any ANSWERS line), or refused it for
+      # good (an injury refusal); a timeout or a resend refusal is neither.
+      def terminal?(result)
+        result.success? || (result.failed? && result.reason == :injured)
+      end
 
       # The kill accounting, once per corpse whatever becomes of the loot:
       # a corpse handed to a follower, looted by a script, or retried

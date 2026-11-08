@@ -139,8 +139,32 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     expect(loot.wants_control?(world)).to be false
   end
 
-  it 'gives a corpse up after three sends the game refused, and at once on a game answer' do
-    refused = EO::Engine::Actions::Result.new(status: :failed, reason: :no_answer)
+  # acted? says the LOOT went on the wire, not that the game answered it:
+  # a timeout and a ladder refusal are stamped acted too, and marking the
+  # corpse on them skipped the three-attempt retry.
+  it 'retries a corpse whose LOOT timed out, instead of marking it on the send' do
+    answers = [
+      EO::Engine::Actions::Result.new(status: :timeout, reason: :no_confirmation, acted: true),
+      EO::Engine::Actions::Result.new(status: :success, acted: true)
+    ]
+    allow(EO::Engine::Actions::Loot).to receive(:new) do |_w, target:|
+      sent << (target ? "loot ##{target.id}" : 'loot room')
+      instance_double(EO::Engine::Actions::Loot, call: target ? answers.shift : EO::Engine::Actions::Result.new(status: :success))
+    end
+    expect(loot.wants_control?(world)).to be true
+    loot.tick(world)
+    expect(sent).to eq(['loot #1'])
+    expect(loot.wants_control?(world)).to be true
+    loot.tick(world)
+    expect(sent).to eq(['loot #1', 'loot #1', 'loot room'])
+    expect(loot.wants_control?(world)).to be false
+  end
+
+  # The game's answers (ANSWERS, refusals included) come back as success;
+  # a failed Result that still acted is a timeout or a ladder refusal, and
+  # only the injury refusal is final. Anything else gets its three tries.
+  it 'gives a corpse up after three sends the game refused, and at once on a permanent refusal' do
+    refused = EO::Engine::Actions::Result.new(status: :failed, reason: :no_answer, acted: true)
     allow(EO::Engine::Actions::Loot).to receive(:new) do |_w, target:|
       sent << (target ? "loot ##{target.id}" : 'loot room')
       instance_double(EO::Engine::Actions::Loot, call: refused)
@@ -149,7 +173,7 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     expect(sent).to eq(['loot #1', 'loot #1', 'loot #1'])
 
     room.creatures << npc(2, status: 'dead')
-    answered = EO::Engine::Actions::Result.new(status: :failed, reason: :no_answer, acted: true)
+    answered = EO::Engine::Actions::Result.new(status: :failed, reason: :injured, acted: true)
     allow(EO::Engine::Actions::Loot).to receive(:new) do |_w, target:|
       sent << (target ? "loot ##{target.id}" : 'loot room')
       instance_double(EO::Engine::Actions::Loot, call: answered)
