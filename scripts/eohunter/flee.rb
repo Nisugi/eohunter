@@ -508,7 +508,13 @@ module EO::Engine
         @wander_stance = wander_stance
         @stanced = false
         @entered_room = nil
-        Events.on(:flee_message) { @latched = true }
+        @latched_room = nil
+        @world = nil
+        # The latch belongs to the room the message was seen in, read from
+        # the world at that moment: a message that lands in the new room
+        # before the tick that notices the move is a fresh warning, not a
+        # stale one to drop.
+        Events.on(:flee_message) { @latched = true; @latched_room = @world&.room&.id }
         Events.on(:bolted) { @latched = false }
         Watch.on(policy.message, :flee_message) if policy.message
       end
@@ -529,6 +535,7 @@ module EO::Engine
       # @param world [World]
       # @return [Boolean] true when there is a reason to leave
       def wants_control?(world)
+        @world = world
         note_room(world)
         # A supervised go2 already has a destination and is normally the
         # fastest way out of a transient hazard or crowd. Taking control here
@@ -580,6 +587,16 @@ module EO::Engine
         id = world.room.id
         return if id == @entered_room
 
+        # The latch is the room's: a room change by anyone (go2, follow,
+        # the player) leaves the flee message behind with it. One seen in
+        # this room already still counts; one seen before any room was
+        # known is the first room's.
+        if @latched_room.nil?
+          @latched_room = id if @latched
+        elsif @latched_room != id
+          @latched = false
+          @latched_room = nil
+        end
         @entered_room = id
         @just_entered = true
         @stanced = false
