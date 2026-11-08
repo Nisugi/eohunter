@@ -296,6 +296,7 @@ module EO::Engine
       REPORT_STALE = 10 # a follower silent this long is offline
       # Seconds the leader may be silent before it is lost.
       HEARTBEAT_STALE = 15 # a leader silent this long is lost
+      LOOT_CONFIRM = 10 # seconds a loot order counts as looting before the looter has said so
       # Seconds between liveness pulses, well inside both stale limits.
       PULSE = 3 # the liveness pulse, well inside both
 
@@ -339,6 +340,7 @@ module EO::Engine
         @reports = {}
         @acks = {}
         @rest_prep_cycle = 0
+        @loot_pending = {}
         @active = false
         @leader_state = {}
         @heartbeat = nil
@@ -371,6 +373,7 @@ module EO::Engine
           @reports = {}
           @acks = {}
           @rest_prep_cycle = 0
+          @loot_pending = {}
           @active = false
           @leader_state = {}
           @heartbeat = @clock.now
@@ -497,7 +500,17 @@ module EO::Engine
       # @raise [ArgumentError] for a type not in ORDERS
       def order(name, type, payload = nil, room: nil)
         order = make_order(type, payload, room)
-        @mutex.synchronize { (@queues[name.to_s] ||= []) << order }
+        @mutex.synchronize do
+          (@queues[name.to_s] ||= []) << order
+          # The looter is looting from the moment the order exists: its
+          # own report says so only once it has taken the order and
+          # ticked, and until then the last report (republished by the
+          # heartbeat) still says false, which read as done.
+          if type == :loot
+            @loot_pending[name.to_s] = @clock.now
+            @reports[name.to_s]&.looting = true
+          end
+        end
         order
       end
 
@@ -585,6 +598,14 @@ module EO::Engine
       def report(name, report)
         report.at ||= @clock.now
         @mutex.synchronize do
+          pending = @loot_pending[name.to_s]
+          if pending
+            if report.looting || (report.at.to_f - pending.to_f) >= LOOT_CONFIRM
+              @loot_pending.delete(name.to_s) # confirmed, or never going to be
+            else
+              report.looting = true # a report from before the order
+            end
+          end
           @reports[name.to_s] = report
           @leader_state.dup
         end
