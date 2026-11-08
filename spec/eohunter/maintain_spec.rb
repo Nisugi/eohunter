@@ -178,6 +178,20 @@ RSpec.describe EO::Engine::Maintain::Signs do
     expect(due('411')).to be_nil
   end
 
+  # The flags were one boolean for whatever was in the hand: after a
+  # loadout swap, a disarm or a redraw the new weapon was never blessed.
+  it 'ties the bless flags to the item they were seen on' do
+    spell(902); spell(411)
+    state.blessed_item = '77'
+    state.blessed_902 = true
+    state.blessed_411 = true
+    expect(due('902')).to be_nil
+    expect(due('411')).to be_nil
+    hands.right = OpenStruct.new(id: '88', noun: 'falchion')
+    expect(due('902')).to eq(:cast)
+    expect(due('411')).to eq(:cast)
+  end
+
   it 'gates surge, burst and the shout on stamina and cooldowns' do
     expect(due('9605')).to eq(:maneuver)
     me.stamina = 29
@@ -434,6 +448,40 @@ RSpec.describe EO::Engine::Behaviors::Maintain do
     EO::Engine::Watch.process('Your <a exist="77" noun="katana">katana</a> stops glowing.')
     expect(maintain.state.blessed_902).to be false
     expect(maintain.state.blessed_411).to be true
+  end
+
+  # The fade handler read only the spell number, so a stops-glowing line
+  # for any item in the room cleared our flag and recast 902 on a weapon
+  # that still gleamed.
+  it 'ignores a fade line for an item other than the blessed one' do
+    spell(902)
+    maintain.wants_control?(world)
+    maintain.tick(world) # casts 902, LOOKs at #77
+    expect(maintain.state.blessed_item).to eq('77')
+    expect(maintain.state.blessed_902).to be true
+
+    EO::Engine::Watch.process('Your <a exist="12345" noun="dagger">dagger</a> stops glowing.')
+    expect(maintain.state.blessed_902).to be true
+    expect(maintain.wants_control?(world)).to be false
+
+    EO::Engine::Watch.process('Your <a exist="77" noun="katana">katana</a> stops glowing.')
+    expect(maintain.state.blessed_902).to be false
+    expect(maintain.wants_control?(world)).to be true
+  end
+
+  it 'blesses the weapon drawn after a swap' do
+    spell(902)
+    maintain.wants_control?(world)
+    maintain.tick(world)
+    expect(spells[902].casts).to eq(1)
+    expect(maintain.wants_control?(world)).to be false
+
+    hands.right = OpenStruct.new(id: '88', noun: 'falchion')
+    expect(maintain.wants_control?(world)).to be true
+    maintain.tick(world)
+    expect(spells[902].casts).to eq(2)
+    expect(maintain.state.blessed_item).to eq('88')
+    expect(maintain.wants_control?(world)).to be false
   end
 
   it 'blesses a weapon the watch reported before any sign' do

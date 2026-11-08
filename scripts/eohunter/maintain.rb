@@ -46,17 +46,52 @@ module EO::Engine
       #   @return [Boolean] the right hand's item gleams with 902
       # @!attribute blessed_411
       #   @return [Boolean] the right hand's item is surrounded by 411
+      # @!attribute blessed_item
+      #   @return [String, nil] the item id the two flags describe; nil
+      #     when unknown (set by hand), which reads as any item
       # @!attribute adrenal_at
       #   @return [Time, nil] when Adrenal Surge was last cast
-      attr_accessor :blessed_902, :blessed_411, :adrenal_at
+      attr_accessor :blessed_902, :blessed_411, :blessed_item, :adrenal_at
       # @return [Array<String>] the item ids still wanting a bless, newest last
       attr_reader :bless_wanted
 
       def initialize
         @blessed_902 = false
         @blessed_411 = false
+        @blessed_item = nil
         @bless_wanted = []
         @adrenal_at = nil
+      end
+
+      # Whether +num+ (902 or 411) is known to be on the item +id+: the
+      # flags were LOOKed for on one item, and a swap, a disarm or a
+      # redraw puts another in the hand. One global boolean never blessed
+      # the second weapon.
+      #
+      # @param num [Integer] 902 or 411
+      # @param id [String, nil] the item in the right hand
+      # @return [Boolean]
+      def blessed?(num, id)
+        flag = num == 902 ? @blessed_902 : @blessed_411
+        return false unless flag
+
+        @blessed_item.nil? || @blessed_item.to_s == id.to_s
+      end
+
+      # The game said +num+ left the item +id+: clear the flag when it is
+      # ours, or when either side is unknown; a fade line for some other
+      # item in the room leaves ours alone.
+      #
+      # @param num [Integer] 902 or 411
+      # @param id [String, nil] the item the line named
+      # @return [void]
+      def fade!(num, id)
+        return if id && @blessed_item && @blessed_item.to_s != id.to_s
+
+        case num
+        when 902 then @blessed_902 = false
+        when 411 then @blessed_411 = false
+        end
       end
     end
 
@@ -220,17 +255,17 @@ module EO::Engine
         s && s.known? && s.affordable?
       end
 
-      # A 902/411 flare is due when its flag is clear, the spell is ready,
-      # and there is something in the right hand to put it on.
+      # A 902/411 flare is due when the right hand holds something the
+      # flag does not vouch for, and the spell is ready.
       #
       # @param world [World]
       # @param sign [Sign] the 902 or 411 entry
       # @param state [State] the two flare flags
       # @return [Symbol, nil, false] :cast when due
       def next_bless_due(world, sign, state)
-        flagged = sign.kind == :bless_902 ? state.blessed_902 : state.blessed_411
-        return nil if flagged
-        return nil if world.hands.right.id.nil?
+        id = world.hands.right.id
+        return nil if id.nil?
+        return nil if state.blessed?(sign.num, id)
 
         spell_ready?(world, sign.num) && :cast
       end
@@ -526,7 +561,9 @@ module EO::Engine
       #
       # @return [Actions::Result] success, the LOOK lines joined as the line
       def perform
-        lines = look_at(@world.hands.right.id).join(' ')
+        id = @world.hands.right.id
+        lines = look_at(id).join(' ')
+        @state.blessed_item = id.to_s
         @state.blessed_902 = lines.match?(GLEAMS)
         @state.blessed_411 = lines.match?(SCINTILLATING)
         Result.new(status: :success, line: lines)
@@ -767,12 +804,7 @@ module EO::Engine
         # profile's flee_message (flee.rb 407).
         Watch.on(Actions::WeaponBlessCheck::STOPS_GLOWING, :weapon_flare_faded) { |m| { id: m[:id], num: 902 } }
         Watch.on(Actions::WeaponBlessCheck::FADES_AWAY, :weapon_flare_faded) { |m| { id: m[:id], num: 411 } }
-        Events.on(:weapon_flare_faded) do |e|
-          case e.data[:num]
-          when 902 then state.blessed_902 = false
-          when 411 then state.blessed_411 = false
-          end
-        end
+        Events.on(:weapon_flare_faded) { |e| state.fade!(e.data[:num], e.data[:id]) }
       end
     end
   end
