@@ -215,7 +215,12 @@ module EO::Engine
     # @!attribute looting
     #   @return [Boolean] still looting
     # @!attribute rest_prep_done
-    #   @return [Boolean] the resting prep lists have run
+    #   @return [Boolean, Integer] false until the resting prep lists have
+    #     run; then the leader's :resting_prep cycle they ran for, or true
+    #     from a follower whose order named none. The cycle rides in this
+    #     field because the Struct's layout is the DRb wire format: a
+    #     member added here is a TypeError (struct size differs) for every
+    #     follower still on the old layout.
     # @!attribute rest_reason
     #   @return [String, nil] why the follower wants to rest, or nil
     # @!attribute not_hunting_reason
@@ -253,7 +258,9 @@ module EO::Engine
     # @param counters [Rest::Counters] the follower's rest counters
     # @param sneaky [Boolean] the follower's sneaky_sneaky
     # @param looting [Boolean] still looting
-    # @param rest_prep_done [Boolean] the resting prep lists have run
+    # @param rest_prep_done [Boolean, Integer] the resting prep lists have
+    #   run; Orders#rest_prep_done answers the :resting_prep cycle they ran
+    #   for, carried as is
     # @param bounty [Symbol, nil] :none, :hunting, :complete or :failed
     # @param forced [String, nil] a rest the follower's own events asked for
     #   (Rest#rest!: no fresh wands, ammo with no effect, a stuck maintain),
@@ -331,6 +338,7 @@ module EO::Engine
         @queues = {}
         @reports = {}
         @acks = {}
+        @rest_prep_cycle = 0
         @active = false
         @leader_state = {}
         @heartbeat = nil
@@ -362,6 +370,7 @@ module EO::Engine
           @queues = {}
           @reports = {}
           @acks = {}
+          @rest_prep_cycle = 0
           @active = false
           @leader_state = {}
           @heartbeat = @clock.now
@@ -453,20 +462,30 @@ module EO::Engine
       # @return [Order] the order queued
       # @raise [ArgumentError] for a type not in ORDERS
       def broadcast(type, payload = nil, room: nil)
-        order = make_order(type, payload, room)
         @mutex.synchronize do
+          if type == :resting_prep
+            # The follower clears its own rest_prep_done when it processes
+            # the order, at least a tick away, and its reports in between
+            # (a heartbeat republishes the last one) still say last cycle's
+            # true. Clearing the stored flag covers the leader's same-call
+            # check; the cycle number the order carries, echoed in the
+            # report, is what rest_prep_complete? matches, so a stale true
+            # filed after this order does not pass the barrier.
+            @rest_prep_cycle += 1
+            payload = @rest_prep_cycle
+            @reports.each_value { |r| r.rest_prep_done = false if r.respond_to?(:rest_prep_done=) }
+          end
+          order = make_order(type, payload, room)
           @queues.each_value { |q| q << order }
-          # The follower clears its own rest_prep_done when it processes the
-          # order, which is at least a tick away and may be several. The
-          # leader queues :resting_prep and tests rest_prep_complete? in the
-          # same call, so on every rest after the first it read last cycle's
-          # true and the barrier passed before any follower had prepped.
-          # Clearing here means the flag is false from the moment the order
-          # exists, and only a fresh report can set it again.
-          @reports.each_value { |r| r.rest_prep_done = false if r.respond_to?(:rest_prep_done=) } if type == :resting_prep
+          order
         end
-        order
       end
+
+      # The :resting_prep cycle in force: incremented by each broadcast of
+      # that order, carried as its payload, echoed in the followers' reports.
+      #
+      # @return [Integer] 0 before the first :resting_prep
+      def rest_prep_cycle = @mutex.synchronize { @rest_prep_cycle }
 
       # An order to one follower.
       #
@@ -1091,7 +1110,15 @@ module EO::Engine
       # is the signal the leader waits on before ending a rest.
       # @bigshot Bigshot::Group
       # @return [Boolean] true when every online follower's rest prep has run
-      def rest_prep_complete? = reports.values.all?(&:rest_prep_done)
+      #   for the current :resting_prep cycle (a bare true, from a follower
+      #   whose order named no cycle, is taken at its word)
+      def rest_prep_complete?
+        cycle = @hub.rest_prep_cycle
+        reports.values.all? do |r|
+          done = r.rest_prep_done
+          done && (!done.is_a?(Integer) || done == cycle)
+        end
+      end
 
       # Moving now would leave a sneaky follower standing visible in the
       # room the group is leaving.
@@ -1797,7 +1824,9 @@ module EO::Engine
       PREPARATION_SUPERSEDERS = %i[attack hunting_scripts_stop prep_rest leave_group fog_return go2_waypoints go2_resting_room
                                    resting_prep resting_scripts_start hunt_over].freeze
 
-      # @return [Boolean] true once the resting scripts order has finished
+      # @return [Integer, Boolean] false until the resting scripts order has
+      #   finished; then the :resting_prep cycle it finished for, or true
+      #   under a leader whose order named none
       attr_reader :rest_prep_done
 
       # @param member [Group::Member]
@@ -1826,6 +1855,7 @@ module EO::Engine
         @queue = []
         @phase = :idle
         @rest_prep_done = false
+        @rest_prep_cycle = nil
         @commands = []
         @script_list = []
         @rooms = []
@@ -2017,10 +2047,11 @@ module EO::Engine
         when :go2_resting_room then room(rooms[:resting])
         when :resting_prep
           @rest_prep_done = false
+          @rest_prep_cycle = order.payload.is_a?(Integer) ? order.payload : nil
           @counters.reset!
           prep(@policy.resting_command_list, [], wait_for_scripts: true)
         when :resting_scripts_start
-          @after = -> { @rest_prep_done = true }
+          @after = -> { @rest_prep_done = @rest_prep_cycle || true }
           prep([], @policy.resting_script_list, wait_for_scripts: true)
         when :loot
           if order.payload.to_s == @member.name
