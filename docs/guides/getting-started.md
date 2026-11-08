@@ -107,6 +107,8 @@ whether the profile says what you meant.
 | `;eohunter bounty [<creature>] [head|tail]` | ebounty's hunt child, in place of `bigshot bounty`, alone or in a group |
 | `;eohunter setup` | open the hunt editor |
 | `;eohunter reload` | drop what is loaded, so the next run reads the files fresh |
+| `;eohunter <profile> debug[=<cat>,..]` | hunt with the debug trace on; see [Troubleshooting](troubleshooting.md#the-debug-trace) |
+| `;eohunter debug <words>` | the debug trace's switches, while a hunt runs or before one: `on`, `off`, `all`, a category, `tick`, `file`, `feed`, `help` |
 
 Group hunting is described in the README. The leader serves its rally
 hub on the loopback address, so leader and followers share a machine by

@@ -40,6 +40,9 @@ Profiles and settings under `data/` are never touched.
 ;eohunter bounty [<creature>] [head|tail]   ebounty's hunt child, in place of "bigshot bounty"
 ;eohunter setup                        open the hunt editor
 ;eohunter reload                       drop what is loaded, so the next run reads the files fresh
+;eohunter <profile> debug[=<cat>,..]   hunt with the debug trace on (every category, or these)
+;eohunter debug [<words>]              the debug trace while a hunt runs: on, off, all, <category> [on|off],
+                                       tick, file, feed, help
 ```
 
 eohunter needs Lich 5.22.0 or later: the first release with all nine

@@ -66,6 +66,7 @@ module ::EO
       cleanse
       group
       runner
+      trace
       coordination_hold
       coordination
       controller

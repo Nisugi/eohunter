@@ -138,7 +138,7 @@ RSpec.describe 'strict movement entrypoint wiring' do
       stub_const('EOHunter', adapter)
       allow(adapter).to receive_messages(
         lead: group, follow: group, build: behaviors, build_follower: behaviors,
-        report: nil, wire: nil, wire_movement: nil
+        report: nil, wire: nil, wire_movement: nil, trace: nil
       )
       allow(EO::Engine::Engine).to receive(:new).and_return(engine)
       allow(EO::Engine::Watch).to receive(:install!).and_raise('watch failed')

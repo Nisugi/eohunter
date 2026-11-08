@@ -16,6 +16,9 @@
                                            ebounty put in UserVars.op, its bounty_eval, exit at rest
     ;eohunter setup                        open the hunt editor in the WebUI
     ;eohunter reload                       drop what is loaded, so the next run reads the files fresh
+    ;eohunter <profile> debug[=<cat>,..]   hunt with the debug trace on (every category, or these)
+    ;eohunter debug [<words>]              the debug trace, while a hunt runs or before one: on, off,
+                                           all, <category> [on|off], tick, feed, file, help, status
 
   Behaviors by priority: Survival 0, Cleanse 5 (ecleanse folded in; its
   settings from ecleanse.yaml), Flee 10, Muster 15 (the leader's holds),
@@ -100,6 +103,43 @@ if script.vars[1].to_s =~ /\A(setup|edit|editor)\z/i
   exit
 end
 
+# The debug trace's switches, from a second invocation while a hunt runs
+# (or before one). Above the running guard on purpose: that is the point.
+# It never loads the engine (the load below drops EO::Engine, which would
+# deafen the running hunt): the Settings grammar lives in trace.rb alone,
+# so that one part is loaded into whatever EO::Engine there is, or into
+# an empty one that the next hunt's load replaces.
+if script.vars[1].to_s =~ /\Adebug\z/i
+  module ::EO; module Engine; end; end unless defined?(::EO::Engine)
+  load File.join(SCRIPT_DIR, 'eohunter', 'trace.rb') unless defined?(::EO::Engine::Trace)
+  words = script.vars[2..].to_a.map(&:to_s)
+  trace_file = File.join(LOG_DIR, 'debug', "#{XMLData.game}-#{XMLData.name}", 'eohunter.log')
+  if words.first.to_s =~ /\Ahelp\z/i
+    Lich::Messaging.mono(<<~HELP)
+      ;eohunter debug                  what is on
+      ;eohunter debug on | off         the trace itself; lines go to the front end, or to the file when that is on
+      ;eohunter debug all              every category
+      ;eohunter debug <cat>[,<cat>]    only these categories (from all), or these as well (from a list)
+      ;eohunter debug <cat> off        this category no more
+      ;eohunter debug tick [on|off]    one line per engine tick: who held it, what came of it, who declined and why
+      ;eohunter debug file [on|off]    write to #{trace_file} instead of the front end
+      ;eohunter debug feed [on|off]    mirror the game feed into the file too (file must be on)
+      categories: #{EO::Engine::Trace::NAMES.join(', ')}
+      a running hunt picks a change up within a tick; the settings persist per character
+    HELP
+  else
+    begin
+      settings = EO::Engine::Trace::Settings.apply(CharSettings['debug'], words)
+      CharSettings['debug'] = settings
+      Lich::Messaging.msg('info', "eohunter: #{EO::Engine::Trace::Settings.describe(settings)}")
+      Lich::Messaging.msg('info', "eohunter: writing to #{trace_file}") if settings['on'] && settings['file']
+    rescue ArgumentError => e
+      Lich::Messaging.msg('error', "eohunter: #{e.message}; ;eohunter debug help")
+    end
+  end
+  exit
+end
+
 # Before the load below, which does remove_const on EO::Engine. Ruby
 # resolves constants at call time, so a second instance gives the first
 # one's before_dying a *different* Watch and Events: killing the older
@@ -141,6 +181,129 @@ module EOHunter
   # @param text [String]
   # @return [void]
   def self.msg(kind, text) = Lich::Messaging.msg(kind, "eohunter: #{text}")
+
+  # Where the debug trace's file lands: bigshot's place, one file per
+  # character, appended across runs.
+  #
+  # @return [String]
+  def self.trace_path = File.join(LOG_DIR, 'debug', "#{XMLData.game}-#{XMLData.name}", 'eohunter.log')
+
+  # Bytes at which the file is rolled to .1 when a run opens it.
+  TRACE_ROLL_AT = 20 * 1024 * 1024
+  # The hook name the game-feed mirror registers under.
+  TRACE_HOOK = 'eohunter::trace'
+
+  # The trace's file sink: lines queued from the engine's thread and
+  # written by one of its own, so a slow disk never holds a tick.
+  class TraceFile
+    # @param path [String]
+    def initialize(path)
+      require 'fileutils'
+      FileUtils.mkdir_p(File.dirname(path))
+      File.rename(path, "#{path}.1") if File.exist?(path) && File.size(path) > TRACE_ROLL_AT
+      @path = path
+      @queue = Queue.new
+      @thread = Thread.new { drain }
+    end
+
+    # @param line [String]
+    # @return [void]
+    def call(line) = @queue << line.to_s
+
+    # Flush and stop the writer.
+    #
+    # @return [void]
+    def close
+      @queue << :close
+      @thread.join(2)
+    end
+
+    private
+
+    def drain
+      File.open(@path, 'a') do |f|
+        f.sync = true
+        loop do
+          line = @queue.pop
+          break if line == :close
+
+          f.puts(line)
+        end
+      end
+    rescue StandardError => e
+      Lich::Messaging.msg('error', "eohunter: trace file #{@path}: #{e.class}: #{e.message}")
+    end
+  end
+
+  # The debug trace over this engine: the Session on the bus and the
+  # tick hook, a front-end sink or the file (not both: bigshot's rule,
+  # and a front end full of trace lines is unusable), the game-feed
+  # mirror into the file when asked, and CharSettings reread every tick
+  # so `;eohunter debug ...` from another invocation takes effect in the
+  # running hunt.
+  #
+  # @param engine [E::Engine]
+  # @return [E::Trace::Session]
+  def self.trace(engine)
+    file = nil
+    feed = false
+    front = ->(line) { Lich::Messaging.mono("eohunter| #{line}") unless file }
+    to_file = ->(line) { file&.call(line) }
+    session = E::Trace::Session.new(sinks: [front, to_file], settings: CharSettings['debug'])
+    sync = lambda do |s|
+      want_file = s['on'] && s['file']
+      if want_file && file.nil?
+        file = TraceFile.new(trace_path)
+      elsif !want_file && file
+        file.close
+        file = nil
+      end
+      want_feed = want_file && s['feed']
+      if want_feed && !feed
+        stamp = -> { Time.now.strftime('%H:%M:%S.%L') }
+        UpstreamHook.add(TRACE_HOOK, proc { |data|
+          file&.call("#{stamp.call} >>> #{data.to_s.sub(/\A<c>/, '').strip}")
+          data
+        })
+        DownstreamHook.add(TRACE_HOOK, proc { |data|
+          # tags off, entities back, and the bare prompt dropped
+          text = data.to_s.gsub(/<[^>]*>/, '').gsub('&gt;', '>').gsub('&lt;', '<').gsub('&amp;', '&').strip
+          file&.call("#{stamp.call} <<< #{text}") unless text.empty? || text == '>'
+          data
+        })
+        feed = true
+      elsif !want_feed && feed
+        UpstreamHook.remove(TRACE_HOOK)
+        DownstreamHook.remove(TRACE_HOOK)
+        feed = false
+      end
+    end
+    sync.call(session.settings)
+    session.install!(engine)
+    session.note("eohunter #{E::VERSION} #{Char.name}: #{E::Trace::Settings.describe(session.settings)}")
+    remind = lambda do
+      next unless session.settings['on'] && session.settings['file']
+
+      msg('warn', "debug trace to file is on: #{trace_path}")
+      msg('warn', '  ;eohunter debug file   turns the file off;  ;eohunter debug off   the trace')
+    end
+    remind.call
+    engine.on_tick do
+      next unless session.configure(CharSettings['debug'])
+
+      sync.call(session.settings)
+      session.note(E::Trace::Settings.describe(session.settings))
+      msg('info', E::Trace::Settings.describe(session.settings))
+      remind.call
+    end
+    before_dying do
+      session.note("engine stopped: #{engine.stop_reason || '-'}")
+      session.uninstall!
+      remind.call
+      sync.call(E::Trace::Settings::DEFAULT)
+    end
+    session
+  end
 
   # Load the optional coordination library only for features that consume it.
   # Ordinary solo and legacy group hunts retain their existing dependencies.
@@ -787,6 +950,22 @@ mode_args = mode_at ? options[(mode_at + 1)..] : []
 mode = 'head' if mode == 'lead'
 mode = 'tail' if mode == 'follow'
 options = options[0...mode_at] if mode_at
+# `debug` and what follows it: the same grammar as ;eohunter debug, saved
+# the same way, except that a bare `debug` is `debug on` and a bare
+# switch is set rather than toggled (a launch word states, not flips).
+if (debug_at = options.index { |o| o =~ /\Adebug(=|\z)/i })
+  debug_words = options[debug_at..]
+  options = options[0...debug_at]
+  debug_words[0] = 'on' if debug_words[0] =~ /\Adebug\z/i
+  debug_words << 'on' if debug_words.size == 1 && EO::Engine::Trace::Settings::SWITCHES.include?(debug_words[0].downcase)
+  begin
+    on = EO::Engine::Trace::Settings.apply(CharSettings['debug'], ['on'])
+    CharSettings['debug'] = EO::Engine::Trace::Settings.apply(on, debug_words)
+  rescue ArgumentError => e
+    EOHunter.msg('error', "#{e.message}; ;eohunter debug help")
+    exit
+  end
+end
 if trial && !controlled
   raise EO::Engine::Controller::Invalid, 'trial sequences require a supervised controller launch'
 end
@@ -887,6 +1066,7 @@ if mode == 'tail'
   behaviors = EOHunter.build_follower(profile, world, member)
   engine = EO::Engine::Engine.new(world: world, behaviors: behaviors.values_at(:survival, :cleanse, :flee, :rest, :loot, :loadout, :maintain, :engage, :wander))
   EOHunter.wire(engine, behaviors)
+  EOHunter.trace(engine)
   EOHunter.wire_movement(engine, orders: behaviors[:rest]) if member.strict_movement?
   checked_at = Time.now
   encumbrance = EO::Engine::Rest::Encumbrance.new(seconds: profile['encumbrance_grace_seconds'])
@@ -968,6 +1148,7 @@ end
 
 engine = EO::Engine::Engine.new(world: world, behaviors: behaviors.values_at(:survival, :cleanse, :flee, :muster, :rest, :loot, :loadout, :maintain, :engage, :wander).compact)
 EOHunter.wire(engine, behaviors)
+EOHunter.trace(engine)
 rest = behaviors[:rest]
 engage = behaviors[:engage]
 if leader

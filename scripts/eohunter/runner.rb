@@ -28,6 +28,19 @@ module EO::Engine
     # @return [Array<Array(String, Boolean)>]
     attr_reader :last_evaluations
 
+    # The result the holding behavior returned on the last tick, nil when
+    # the tick was idle or paused. With last_evaluations it is the whole
+    # account of a tick, which the debug trace prints.
+    #
+    # @return [Actions::Result, nil]
+    attr_reader :last_result
+
+    # The behaviors, in priority order. The trace asks each declining one
+    # for its reason.
+    #
+    # @return [Array<Behavior>]
+    attr_reader :behaviors
+
     # @param world [World]
     # @param behaviors [Array<Behavior>] sorted here by priority
     # @param interval [Numeric] seconds slept after each tick
@@ -44,6 +57,7 @@ module EO::Engine
       @consecutive_failures = 0
       @fires = Hash.new { |h, k| h[k] = [] }
       @last_evaluations = []
+      @last_result = nil
       @holder = nil
       @on_tick = []
       @on_tick_completed = []
@@ -167,6 +181,7 @@ module EO::Engine
       return if @stopping
 
       if paused?
+        @last_result = nil
         hand_off(nil)
         complete_tick
         sleep(@interval)
@@ -178,8 +193,10 @@ module EO::Engine
       hand_off(behavior)
       if behavior
         result = behavior.tick(@world)
+        @last_result = result
         track(behavior, result)
       else
+        @last_result = nil
         idle
       end
       complete_tick
