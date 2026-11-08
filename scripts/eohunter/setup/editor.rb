@@ -20,11 +20,11 @@ module EO
       #
       # They label the sidebar, so they can say what the page is for.
       TITLES = {
-        'area' => 'Areas & creatures', 'hunting' => 'Hunting behavior',
-        'rest' => 'Rest & services', 'recovery' => 'Recovery & emergencies',
-        'monitoring' => 'Monitoring', 'combat' => 'Combat plans',
-        'equipment' => 'Equipment', 'buffs' => 'Buffs',
-        'preparations' => 'Preparations & commands', 'team' => 'Multi-account team'
+        'area' => 'Where to hunt', 'creatures' => 'What to hunt', 'hunting' => 'Hunting behavior',
+        'monitoring' => 'When to return', 'rest' => 'Town rest', 'field' => 'Field rest & getting home',
+        'recovery' => 'Recovery & emergencies', 'combat' => 'Combat routines', 'unarmed' => 'Unarmed & MSTRIKE',
+        'equipment' => 'Equipment', 'buffs' => 'Buffs', 'preparations' => 'Preparations & scripts',
+        'team' => 'Multi-account team'
       }.freeze
 
       # Settings pages, in the schema's own order.
@@ -37,8 +37,9 @@ module EO
       # settings that only matter with other people.
       SECTIONS = [
         ['Profiles', %w[manage]],
-        ['Hunting & recovery', %w[area hunting rest recovery monitoring]],
-        ['Combat & equipment', %w[combat equipment buffs preparations]],
+        ['The hunt', %w[area creatures hunting monitoring]],
+        ['Rest & recovery', %w[rest field recovery]],
+        ['Combat & equipment', %w[combat unarmed equipment buffs preparations]],
         ['Hunting with others', %w[team]],
         ['Finish', %w[review]]
       ].freeze
@@ -64,42 +65,6 @@ module EO
           { id: page, label: title, section: section }
         end
       end.freeze
-
-      # The guided path: five steps, each a plain-language question rather than
-      # a settings page. Each step names the handful of settings it asks about,
-      # grouped under the question it answers -- the point of the wizard is
-      # that it does NOT show all 119 fields.
-      STEPS = [
-        # Where and what, first.
-        #
-        # This asked for the hands first, and nobody opens a hunt editor
-        # thinking about their left hand -- they arrive wanting to hunt
-        # somewhere. Leading with the area also puts the two in the order
-        # they depend on: which weapon a player wants follows from what they
-        # are fighting, not the other way round.
-        { id: 'area', title: 'Area & creatures', hint: 'Where and what to hunt',
-          groups: [['What do you want to hunt?', %w[targets invalid_targets always_flee_from]],
-                   ['Use room numbers from your map', %w[hunting_room_id hunting_boundaries]]] },
-        { id: 'character', title: 'Your character', hint: 'Equipment and usual settings',
-          # No ammunition group. `ammo` and `ammo_container` are from an older
-          # game: the ready list sets what a character fires, and ammunition
-          # that needs putting away gets a STOW. Both settings still exist in
-          # the full editor for a hunt that has them.
-          groups: [['What should be in your hands?', %w[hunting_right_hand hunting_left_hand]]] },
-        { id: 'combat', title: 'Combat approach', hint: 'Usual sequence and exceptions',
-          groups: [['What do you do to a creature?', %w[hunting_commands]],
-                   ['How many creatures can you handle?', %w[flee_count lone_targets_only]],
-                   ['How do you stand and move?', %w[hunting_stance wander_stance]]] },
-        { id: 'rest', title: 'Rest & recovery', hint: 'When to return and recover',
-          groups: [['Where will you recover?', %w[resting_room_id field_rest_room_id]],
-                   ['When should you return?', %w[fried oom encumbered]],
-                   ['What happens at rest?', %w[resting_scripts resting_commands]],
-                   ['When should hunting resume?', %w[rest_till_exp rest_till_mana]]] },
-        { id: 'review', title: 'Review & save', hint: 'Check the whole plan', groups: [] }
-      ].freeze
-
-      # @return [Array<String>] the step identities, in order
-      STEP_IDS = STEPS.map { |step| step[:id] }.freeze
 
       attr_reader :app, :boot, :draft, :name, :kind, :revision, :validation, :status, :status_error,
                   :pending_delete
@@ -150,64 +115,6 @@ module EO
 
         @pending_delete = nil
         on_delete(pending[:name], pending[:revision], kind: pending[:kind])
-      end
-
-      # @return [Boolean] whether the guided path is showing
-      def guided? = @guided == true
-
-      # @return [String] the step being shown
-      def step = @step ||= STEP_IDS.first
-
-      # @return [Integer] its 1-based position, for "step N of 5"
-      def step_number = STEP_IDS.index(step).to_i + 1
-
-      # Whether every setting a step asks about has been given a value.
-      #
-      # "Answered", not "valid": the wizard marks a step done when the player
-      # has said something for each of its questions. Validation is the Review
-      # step's job, and a step marked done can still hold a value the engine
-      # will reject.
-      # @param id [String] step identity
-      # @return [Boolean]
-      def step_answered?(id)
-        definition = STEPS.find { |entry| entry[:id] == id.to_s }
-        keys = Array(definition && definition[:groups]).flat_map { |(_question, fields)| Array(fields) }
-        return false if keys.empty?
-
-        keys.all? { |key| !settings[key].to_s.strip.empty? }
-      end
-
-      # @return [Hash] the current step's definition
-      def step_definition = STEPS.find { |entry| entry[:id] == step } || STEPS.first
-
-      # Enter or leave the guided path. Both views edit the same draft: the
-      # wizard is a way through the settings, not a separate document.
-      # @return [Boolean] whether to re-render
-      def on_toggle_guided
-        @guided = !guided?
-        @step = STEP_IDS.first if guided?
-        note(guided? ? 'Wizard. The same draft, one question at a time.' : 'Full editor.')
-      end
-
-      # Show a particular step.
-      # @param id [String] step identity
-      # @return [Boolean] whether to re-render
-      def on_step(id)
-        return false unless STEP_IDS.include?(id.to_s)
-
-        @step = id.to_s
-        true
-      end
-
-      # Move one step along, stopping at either end.
-      # @param offset [Integer] -1 back, 1 forward
-      # @return [Boolean] whether to re-render
-      def on_step_by(offset)
-        index = STEP_IDS.index(step).to_i + offset
-        return false unless index.between?(0, STEP_IDS.size - 1)
-
-        @step = STEP_IDS[index]
-        true
       end
 
       # @return [Array<Hash>] every field descriptor the schema publishes
@@ -377,6 +284,8 @@ module EO
         @baseline = deep_copy(@draft)
         @validation = nil
         @map = nil
+        @sheet = nil
+        @map_frame = nil
         note('Started a new hunt. Name it, then save.')
       end
 
@@ -430,6 +339,8 @@ module EO
         @baseline = deep_copy(@draft)
         @validation = nil
         @map = nil
+        @sheet = nil
+        @map_frame = nil
         note("Loaded #{name}.")
       rescue StandardError => error
         # The list is rebuilt from disk before the message, so a hunt that has
@@ -462,40 +373,8 @@ module EO
       # @return [Array<Hash>] area records, or [] when there is no map data
       def areas
         @areas ||= Array(@app.call('action' => 'areas'))
-      rescue StandardError => error
-        @area_error = error.message
+      rescue StandardError
         @areas = []
-      end
-
-      # @return [String] what the area search box holds
-      def area_query = @area_query.to_s
-
-      # The areas matching the search, or all of them when it is empty.
-      #
-      # Matches on the area's name and on the creatures living there, because
-      # a player is as likely to know what they want to fight as where.
-      # @return [Array<Hash>]
-      def area_matches
-        terms = area_query.downcase.split
-        return areas if terms.empty?
-
-        # Places.haystack, not a hand-rolled one. This read `entry[:zone]` and
-        # `entry[:creature_names]`, and an area record carries neither -- it
-        # has `zones`, `creatures` and `places` -- so every term but the
-        # habitat's own name silently matched nothing. Searching "ojandhaart",
-        # a village inside the Hinterwilds, found no area at all.
-        areas.select do |entry|
-          haystack = Places.haystack(entry)
-          terms.all? { |term| haystack.include?(term) }
-        end
-      end
-
-      # Narrow the area list.
-      # @param text [String] search text
-      # @return [Boolean] whether to re-render
-      def on_area_search(text)
-        @area_query = text.to_s
-        true
       end
 
       # --- Finding something to hunt ---------------------------------------
@@ -530,9 +409,10 @@ module EO
       # @return [Array<Hash>]
       def creature_matches = Creatures.search(creature_catalogue, hunt_query)
 
-      # The areas those creatures live in, the fullest first.
-      # @return [Array<Hash>]
-      def creature_areas = Creatures.areas_for(creature_matches)
+      # How many creatures the level band cannot place, having no recorded
+      # level. They are found by name.
+      # @return [Integer]
+      def unlevelled_count = creature_catalogue.count { |creature| creature[:level].nil? }
 
       # Change one part of the search.
       # @param field [Symbol, String] a key of the query
@@ -551,306 +431,12 @@ module EO
         true
       end
 
-      # Choose an area from the finder's table.
-      #
-      # The row key is the area name run through the page's own key scrubber,
-      # so it is matched back rather than parsed.
-      # @param key [String] the activated row's key
-      # @return [Boolean] whether to re-render
-      def on_choose_area_row(key)
-        wanted = key.to_s
-        name = creature_areas.map { |area| area[:name].to_s }
-                             .find { |candidate| Page.row_key('a', candidate) == wanted }
-        return false unless name
-
-        on_choose_area(name)
-      end
-
       # @param trait [Symbol] a sparse trait
       # @return [Hash] {yes:, no:, unknown:} over the current matches
       def trait_tally(trait) = Creatures.trait_tally(creature_matches, trait)
 
-      # The named places inside the chosen area, where it has any.
-      #
-      # A creature template records a broad habitat, so every gigas says
-      # "Hinterwilds" while their rooms sit in four separate villages. The
-      # places let a hunt name one village rather than all of them.
-      # @return [Array<Hash>]
-      def places
-        entry = areas.find { |candidate| candidate[:name].to_s == area_name.to_s }
-        Array(entry && entry[:places])
-      end
-
-      # @return [String, nil] the place the hunt is narrowed to
-      attr_reader :place
-
-      # @return [Array<String>] the places the hunt is narrowed to
-      def places_chosen = Array(@places_chosen)
-
-      # Narrow the area to one of its places, or widen back to all of them.
-      #
-      # Selecting a place re-resolves with only the creatures that spawn
-      # there, which is the whole point: choosing Ojandhaart should not offer
-      # Angargreft's disciple.
-      # @param name [String, nil] place name, or blank for the whole area
-      # @return [Boolean] whether to re-render
-      # Choose the hunting area, or clear it.
-      #
-      # Takes a list of nought or one rather than a name, so a searchable
-      # picker can hand over what it holds: there are hundreds of areas.
-      # @param names [Array<String>] the chosen area, or empty
-      # @return [Boolean] whether to re-render
-      def on_choose_areas(names)
-        wanted = Array(names).map(&:to_s).reject(&:empty?).uniq
-        return on_clear_area if wanted.empty?
-
-        @areas_chosen = wanted
-        @place = nil
-        @places_chosen = []
-        @dispositions = {}
-        @area_applied = false
-        on_resolve_area(wanted)
-      end
-
-      # @return [Array<String>] the area names the hunt covers
-      def areas_chosen
-        chosen = Array(@areas_chosen)
-        return chosen unless chosen.empty?
-
-        name = area_name.to_s
-        name.empty? ? [] : [name]
-      end
-
-      # Narrow the area to several of its places, or widen back to all.
-      #
-      # The split is derived from room titles, so it is a good guess rather
-      # than a fact -- two villages a player thinks of as one hunt come back
-      # as two places, and being made to pick one was the picker imposing its
-      # own guess. Several resolve to the union of their creatures and their
-      # spawn rooms, which is the same resolve one place does with more in it.
-      #
-      # @param names [Array<String>] place names, or empty for the whole area
-      # @return [Boolean] whether to re-render
-      def on_choose_places(names)
-        wanted = Array(names).map(&:to_s).reject(&:empty?)
-        entries = places.select { |candidate| wanted.include?(candidate[:name].to_s) }
-        @places_chosen = entries.map { |entry| entry[:name].to_s }
-        # `place` stays the single name where there is one, so everything
-        # reading it -- the heading, the applied note -- keeps working, and
-        # holds nil for none or several rather than claiming one of them.
-        @place = @places_chosen.size == 1 ? @places_chosen.first : nil
-        @dispositions = {}
-        @area_applied = false
-        creatures = entries.empty? ? nil : entries.flat_map { |entry| Array(entry[:creature_names]).map(&:to_s) }.uniq
-        rooms = entries.empty? ? nil : entries.flat_map { |entry| Array(entry[:room_ids]) }.uniq
-        on_resolve_area(area_name, creature_names: creatures, room_ids: rooms,
-                        zone: @area && @area[:zone_id], map_image: @area && @area[:map_image])
-      end
-
-      def on_choose_place(name)
-        text = name.to_s
-        entry = places.find { |candidate| candidate[:name].to_s == text }
-        @place = entry && text
-        @places_chosen = @place ? [@place] : []
-        @dispositions = {}
-        @area_applied = false
-        creatures = entry ? Array(entry[:creature_names]).map(&:to_s) : nil
-        # The place's spawn rooms, not just its creatures. Resolving by
-        # creature alone widens back to everywhere those creatures live -- the
-        # three Hinterwilds villages share their gigas, so picking one village
-        # would otherwise hand back all three.
-        #
-        # Its spawn rooms rather than all of them: a village's smithy is part
-        # of the place but carries no creature UID, and a resolve refuses any
-        # room the catalogue does not place in the habitat. The walker fills
-        # the rest back in when the footprint is built.
-        on_resolve_area(area_name, creature_names: creatures,
-                        room_ids: entry ? Array(entry[:room_ids]) : nil,
-                        zone: @area && @area[:zone_id], map_image: @area && @area[:map_image])
-      end
-
-      # The rooms the chosen place covers, which is what an apply should
-      # write rather than the whole habitat's.
-      # @return [Array<Integer>]
-      def place_room_ids
-        chosen_places.flat_map { |entry| Array(entry[:room_ids]) }.uniq
-      end
-
-      # The place records the hunt is narrowed to, however many.
-      # @return [Array<Hash>]
-      def chosen_places
-        names = places_chosen
-        return [] if names.empty?
-
-        places.select { |candidate| names.include?(candidate[:name].to_s) }
-      end
-
-      # Every creature the current area or place offers, for the picker.
-      # @return [Array<Hash>] {name:, chosen:}
-      def area_creatures
-        return [] unless @area
-
-        # The editor's own ticks, not the resolver's selection. Resolving
-        # returns every creature as selected, so an area opened with all
-        # nineteen ticked and the player's first job was to untick them --
-        # and passing an empty list back is not the opposite, it filters the
-        # area down to no creatures and no rooms at all.
-        #
-        # Nothing ticked is not an empty answer either: the engine hunts
-        # everything otherwise eligible when the list is empty, so the two
-        # say the same thing and this one says it more quietly.
-        dispositions = @dispositions ||= {}
-        levels = Array(@area[:creatures]).to_h { |creature| [creature[:name].to_s, creature[:level]] }
-        narrowed = chosen_places
-        offered = if narrowed.empty?
-                    Array(@area[:creatures]).map { |creature| creature[:name].to_s }
-                  else
-                    narrowed.flat_map { |place| Array(place[:creature_names]).map(&:to_s) }
-                  end
-        # By level, hardest last: a player reading a list of nineteen wants
-        # to know what is in it, and the name tells them less than the level.
-        offered.uniq
-               .sort_by { |name| [levels[name] || 0, name] }
-               .map do |name|
-                 { name: name, level: levels[name],
-                   # Nil, not "leave alone": a creature nobody has said
-                   # anything about is unanswered, and the two differ now
-                   # that each disposition is a list naming its members.
-                   # Defaulting to leave alone would put every creature in
-                   # that list, the opposite of what an untouched draft means.
-                   disposition: dispositions[name],
-                   chosen: dispositions[name] == CREATURE_HUNT }
-               end
-      end
-
-      # Whether the resolved area has been written into the draft.
-      #
-      # What the picker was for: once it has been used the step's own
-      # settings carry the answer, and the picker can fold away.
-      # @return [Boolean]
-      def area_applied? = @area_applied == true
-
-      # Choose an area from a card, which is resolving it by name.
-      # @param name [String] area name
-      # @return [Boolean] whether to re-render
-      # Forget the chosen area, so the picker is open again.
-      # @return [Boolean] whether to re-render
-      def on_clear_area
-        @area = nil
-        @area_name = nil
-        @areas_chosen = []
-        @place = nil
-        @places_chosen = []
-        @dispositions = {}
-        @area_applied = false
-        true
-      end
-
-      # How several area names are carried as one, matching Geography::SEPARATOR.
-      AREA_JOIN = ' | '
-
-      def on_choose_area(name)
-        @areas_chosen = [name.to_s]
-        @place = nil
-        @places_chosen = []
-        @dispositions = {}
-        @area_applied = false
-        on_resolve_area(name)
-      end
-
-      # @return [String, nil] why the area catalogue could not be read
-      attr_reader :area_error
-
-      # @return [Hash, nil] the last resolved area: its rooms, boundaries and
-      #   the creatures living there
-      attr_reader :area
-
       # @return [String, nil] the area name the draft names
-      # The area being worked on: the one just resolved, or failing that the
-      # one the draft already names.
-      #
-      # Resolving deliberately does not write to the draft -- applying is what
-      # does that -- so reading the draft alone meant a freshly chosen area
-      # was invisible to everything downstream. The places and the creature
-      # list both key off this, so choosing an area drew neither until it had
-      # already been applied.
-      def area_name = @area_name || @draft['area'] || settings['area']
-
-      # Resolve an area into rooms and boundaries, without writing anything.
-      # Nothing here is field-verified; it is a proposal for the player to
-      # approve.
-      # @param name [String] habitat name
-      # @param creature_names [Array<String>, nil] creatures to hunt
-      # @param zone [String, nil] named subarea, where one is required
-      # @param map_image [String, nil] restrict to one sheet
-      # @return [Boolean] whether to re-render
-      def on_resolve_area(name, creature_names: nil, zone: nil, map_image: nil, room_ids: nil)
-        @area = @app.call('action' => 'area', 'area' => name,
-                          'creature_names' => creature_names, 'zone' => zone,
-                          'map_image' => map_image, 'room_ids' => room_ids)
-        # One name for everything that reads it, however many were resolved.
-        @area_name = Array(name).map(&:to_s).reject(&:empty?).join(AREA_JOIN)
-        note(area_summary)
-      rescue StandardError => error
-        @area = nil
-        note(error.message, error: true)
-      end
-
-      # Put the resolved area into the draft: its start room, boundaries and
-      # the creature list. This is the step that actually edits the hunt, and
-      # it is deliberately separate from resolving, so nothing changes until
-      # the player accepts the proposal.
-      # Where a hunt should begin.
-      #
-      # A room the creatures actually spawn in, not simply the lowest id in
-      # the footprint. Many areas stop spawning while nobody is standing in
-      # them, so a start room outside the creatures' own rooms -- the far side
-      # of an arch, a path in -- means every return walks back into somewhere
-      # that has been emptying while it was away.
-      #
-      # The most central of them, so the first walk out is short in any
-      # direction, and the plain first room only when the area names no spawn
-      # rooms at all.
-      # @param rooms [Array<Integer>] the hunt's footprint
-      # @return [Integer]
-      def start_room_for(rooms)
-        spawns = Array(@area && @area[:spawn_room_ids]).map(&:to_i) & rooms
-        return rooms.first if spawns.empty?
-        return spawns.first if spawns.size < 3
-
-        middle = spawns.sum / spawns.size.to_f
-        spawns.min_by { |id| [(id - middle).abs, id] }
-      end
-
-      # @return [Boolean] whether to re-render
-      def on_apply_area
-        return note('Resolve an area first.', error: true) unless @area
-
-        rooms = Array(@area[:room_ids])
-        return note('That area resolved to no mapped rooms.', error: true) if rooms.empty?
-
-        on_change('hunting_room_id', start_room_for(rooms))
-        write_list('hunting_boundaries', Array(@area[:boundary_ids]).map(&:to_s))
-        by_disposition = Hash.new { |hash, key| hash[key] = [] }
-        area_creatures.each { |creature| by_disposition[creature[:disposition]] << creature[:name] }
-        # One list per answer, each said out loud.
-        #
-        # Left alone goes to `invalid_targets` rather than being left implicit.
-        # A named `targets` is a whitelist, so in that case the two agree --
-        # but the moment a player clears `targets` to hunt everything
-        # eligible, silence would turn every creature they had set aside back
-        # into a target. Saying it keeps the answer true either way.
-        hunted = by_disposition[CREATURE_HUNT]
-        write_list('targets', hunted) unless hunted.empty?
-        ignored = by_disposition[CREATURE_IGNORE]
-        write_list('invalid_targets', ignored) unless ignored.empty?
-        avoided = by_disposition[CREATURE_AVOID]
-        write_list('always_flee_from', avoided) unless avoided.empty?
-        @draft['area'] = @area_name if @area_name
-        @area_applied = true
-        note("Applied #{@area_name}: #{rooms.size} rooms, #{Array(@area[:boundary_ids]).size} boundaries. " \
-             'Area suggestions are not field-verified.')
-      end
+      def area_name = @draft['area'] || settings['area']
 
       # Recompute boundaries for a hand-picked set of rooms, using the same
       # walker the hunt itself uses. Refuses rather than silently widening.
@@ -863,209 +449,6 @@ module EO
         on_change('hunting_room_id', result[:start_room_id])
         write_list('hunting_boundaries', Array(result[:boundary_ids]).map(&:to_s))
         note("Recomputed: #{Array(result[:room_ids]).size} rooms, #{Array(result[:boundary_ids]).size} boundaries.")
-      rescue StandardError => error
-        note(error.message, error: true)
-      end
-
-      # @return [Array<Hash>] named injury policies this character can use
-      def injury_policies = Array(@boot[:injury_policies] || @boot['injury_policies'])
-
-      # @return [String, nil] the character-wide injury default
-      def character_injury_policy
-        preferences = @boot[:character_preferences] || @boot['character_preferences'] || {}
-        preferences[:injury_policy] || preferences['injury_policy']
-      end
-
-      # Set the character-wide injury default. Running hunts keep the settings
-      # they captured.
-      # @param name [String, nil] policy name, or nil to clear
-      # @return [Boolean] whether to re-render
-      def on_set_character_injury_policy(name)
-        preferences = @boot[:character_preferences] || @boot['character_preferences'] || {}
-        @app.call('action' => 'set_character_injury_policy', 'name' => name,
-                  'revision' => preferences[:revision] || preferences['revision'])
-        refresh_boot
-        note(name ? "#{name} is this character's injury default." : 'Cleared the character injury default.')
-      rescue StandardError => error
-        note(error.message, error: true)
-      end
-
-      # Override the character default for this hunt only, or clear the
-      # override. An existing custom wounded_eval stays an override until the
-      # player deliberately replaces it.
-      # @param name [String, nil] policy name, or nil to inherit
-      # @return [Boolean] whether to re-render
-      def on_set_hunt_injury_policy(name)
-        if name.to_s.empty?
-          @draft.delete('injury_policy')
-        else
-          @draft['injury_policy'] = name.to_s
-        end
-        @validation = nil
-        @map = nil
-        note(name.to_s.empty? ? 'This hunt uses the character injury default.' : "This hunt uses #{name}.")
-      end
-
-      # Add or remove one creature from the resolution, and re-resolve so the
-      # rooms follow the choice.
-      # @param name [String] creature name
-      # @return [Boolean] whether to re-render
-      def on_choose_creature(name)
-        return note('Resolve an area first.', error: true) unless @area
-
-        wanted = disposition_for(name) == CREATURE_HUNT ? CREATURE_IGNORE : CREATURE_HUNT
-        on_creature_disposition(name, wanted)
-      end
-
-      # What a hunt does when it meets a creature.
-      #
-      # Three settings, three behaviours: `targets` is what it goes after,
-      # `invalid_targets` is what it will not deliberately attack, and
-      # `always_flee_from` makes it leave the room. They are separate lists
-      # in the engine but one decision per creature to a player, so they are
-      # asked as one.
-      CREATURE_HUNT = 'hunt'
-      CREATURE_IGNORE = 'ignore'
-      CREATURE_AVOID = 'avoid'
-
-      # In the order they escalate, with what each says.
-      CREATURE_DISPOSITIONS = [
-        [CREATURE_HUNT, 'Hunt'],
-        [CREATURE_IGNORE, 'Leave alone'],
-        [CREATURE_AVOID, 'Leave the room']
-      ].freeze
-
-      # What this hunt does about one creature.
-      # @param name [String] creature name
-      # @return [String] one of CREATURE_HUNT, CREATURE_IGNORE, CREATURE_AVOID
-      def disposition_for(name)
-        (@dispositions ||= {})[name.to_s] || CREATURE_IGNORE
-      end
-
-      # Decide what to do about one creature.
-      # @param name [String] creature name
-      # @param disposition [String] what to do
-      # @return [Boolean] whether to re-render
-      def on_creature_disposition(name, disposition)
-        return note('Resolve an area first.', error: true) unless @area
-
-        wanted = disposition.to_s
-        return false unless CREATURE_DISPOSITIONS.any? { |(value, _label)| value == wanted }
-
-        (@dispositions ||= {})[name.to_s] = wanted
-        true
-      end
-
-      # Set one disposition's whole list at once.
-      #
-      # A change is the new membership of that list rather than one creature's
-      # answer. A creature named here takes this disposition; one that was
-      # here and is no longer falls back to hunting, which is what the engine
-      # does with a creature it has not been told to avoid.
-      #
-      # @param disposition [String] one of CREATURE_DISPOSITIONS' values
-      # @param names [Array<String>] creatures that now hold it
-      # @return [Boolean] whether to re-render
-      def on_disposition_list(disposition, names)
-        return note('Resolve an area first.', error: true) unless @area
-
-        wanted = disposition.to_s
-        return false unless CREATURE_DISPOSITIONS.any? { |(value, _label)| value == wanted }
-
-        listed = Array(names).map(&:to_s).reject(&:empty?)
-        @dispositions ||= {}
-        # Only this disposition's own entries are rewritten: the other lists
-        # are other fields, and a creature absent from this one may well be
-        # spoken for by another.
-        @dispositions.delete_if { |_name, value| value == wanted }
-        listed.each { |name| @dispositions[name] = wanted }
-        true
-      end
-
-      # Tick every creature, or none of them.
-      #
-      # None is a real answer, not an empty one: the engine hunts everything
-      # otherwise eligible when the list is empty, so clearing it is how a
-      # player says "whatever lives here".
-      # @return [Boolean] whether to re-render
-      def on_choose_all_creatures
-        return note('Resolve an area first.', error: true) unless @area
-
-        hunting = area_creatures.any? { |creature| creature[:chosen] }
-        @dispositions = area_creatures.to_h do |creature|
-          [creature[:name].to_s, hunting ? CREATURE_IGNORE : CREATURE_HUNT]
-        end
-        true
-      end
-
-      # Choose a named subarea, where the habitat requires one.
-      # @param zone [String] zone id
-      # @return [Boolean] whether to re-render
-      def on_choose_zone(zone)
-        return note('Resolve an area first.', error: true) unless @area
-
-        on_resolve_area(@area_name, creature_names: Array(@area[:selected_creature_names]),
-                                    zone: zone.to_s.empty? ? nil : zone.to_s,
-                                    map_image: @area[:map_image])
-      end
-
-      # @return [Array<String>] reusable Combat Plans this character has
-      def plans = Array(@boot[:plans] || @boot['plans'])
-
-      # @return [Array<Hash>] maneuver words the installed engine knows,
-      #   so the editor can offer them without inventing a vocabulary
-      def routine_maneuvers = Array(@boot[:routine_maneuvers] || @boot['routine_maneuvers'])
-
-      # Point this hunt at a reusable Combat Plan, or clear the link.
-      # @param name [String, nil] plan name
-      # @return [Boolean] whether to re-render
-      def on_set_combat_plan(name)
-        if name.to_s.empty?
-          @draft.delete('combat_plan')
-        else
-          @draft['combat_plan'] = name.to_s
-        end
-        @validation = nil
-        @map = nil
-        note(name.to_s.empty? ? 'This hunt uses its own routines.' : "This hunt uses the #{name} plan.")
-      end
-
-      # Creature names the draft targets, in the order they are written.
-      # @return [Array<String>]
-      def target_names
-        list_entries('targets').map { |entry| entry.sub(/\([a-j]\)\z/i, '').strip }.reject(&:empty?)
-      end
-
-      # Which routine slot a creature uses, if it has its own.
-      # @param creature [String] creature name
-      # @return [String, nil] a-j
-      def routine_slot(creature)
-        entry = list_entries('targets').find { |text| text.sub(/\([a-j]\)\z/i, '').strip.casecmp?(creature.to_s) }
-        entry.to_s[/\(([b-j])\)\z/i, 1]
-      end
-
-      # The command text for a routine slot. 'a' is the hunt's main routine.
-      # @param slot [String, nil] a-j
-      # @return [String]
-      def routine_text(slot)
-        key = slot.nil? || slot.to_s.casecmp?('a') ? 'hunting_commands' : "hunting_commands_#{slot.to_s.downcase}"
-        settings[key].to_s
-      end
-
-      # Give one creature its own action sequence. The native composer picks
-      # the slot and rewrites the target list; existing routines are kept.
-      # @param creature [String] creature name
-      # @param commands [String] the routine text
-      # @return [Boolean] whether to re-render
-      def on_creature_sequence(creature, commands)
-        return note('Give this creature some actions first.', error: true) if commands.to_s.strip.empty?
-
-        result = @app.call('action' => 'creature_sequence', 'data' => @draft,
-                           'creature' => creature, 'commands' => commands)
-        @draft = result.is_a?(Hash) && result['settings'] ? result : @draft.merge(result || {})
-        @validation = nil
-        @map = nil
-        note("#{creature} now has its own sequence.")
       rescue StandardError => error
         note(error.message, error: true)
       end
@@ -1226,8 +609,16 @@ module EO
       def on_save
         return note('Name this hunt before saving.', error: true) if @name.empty?
 
+        # A new name is a new hunt: the store takes no revision for a file
+        # that does not exist, and refuses one that does rather than writing
+        # over a hunt that was never opened.
+        renamed = @name != @loaded_name
+        if renamed && profiles.include?(@name)
+          return note("A hunt named #{@name} already exists. Open it to change it, or pick another name.", error: true)
+        end
+
         saved = @app.call('action' => 'save', 'kind' => @kind, 'name' => @name,
-                          'data' => @draft, 'revision' => @revision)
+                          'data' => @draft, 'revision' => renamed ? nil : @revision)
         @revision = saved[:revision]
         @loaded_name = @name
         @baseline = deep_copy(@draft)
@@ -1250,18 +641,19 @@ module EO
       # What each room role is called.
       ROLE_LABELS = {
         'hunting' => 'Hunting room', 'hunting_boundaries' => 'Boundary',
-        'hunting_room_id' => 'Starting room', 'field_rest_room_id' => 'Field rest',
-        'resting_room_id' => 'Town rest'
+        'hunting_room_id' => 'Starting room', 'rallypoint_room_ids' => 'Rally room',
+        'field_rest_room_id' => 'Field rest', 'resting_room_id' => 'Town rest'
       }.freeze
+
+      # The roles that hold several rooms, as comma text.
+      LIST_ROLES = %w[hunting_boundaries rallypoint_room_ids].freeze
 
       # @return [String, nil] the map sheet being looked at
       attr_reader :sheet
 
-      # The area record the map is drawn for, when one has been chosen.
+      # The area record the map is drawn for, when the draft names one.
       # @return [Hash, nil]
       def map_area
-        return @area if @area.is_a?(Hash) && @area[:maps]
-
         name = area_name
         return nil if name.to_s.empty?
 
@@ -1289,7 +681,9 @@ module EO
       # @return [Boolean] whether to re-render
       def on_sheet(sheet)
         @sheet = sheet.to_s.empty? ? nil : sheet.to_s
+        @sheet_choices = []
         @map = nil
+        @map_frame = nil
         true
       end
 
@@ -1303,6 +697,7 @@ module EO
         markers = current[:markers] || {}
         return 'hunting_room_id' if markers['hunting_room_id'] == id
         return 'hunting_boundaries' if Array(markers['hunting_boundaries']).include?(id)
+        return 'rallypoint_room_ids' if Array(markers['rallypoint_room_ids']).include?(id)
         return 'field_rest_room_id' if markers['field_rest_room_id'] == id
         return 'resting_room_id' if markers['resting_room_id'] == id
         return 'hunting' if Array(current[:hunting_room_ids]).include?(id)
@@ -1317,22 +712,486 @@ module EO
       # @return [Boolean] whether to re-render
       def on_assign_room(role, id)
         case role
-        when 'hunting_boundaries'
-          current = settings['hunting_boundaries']
+        when *LIST_ROLES
+          current = settings[role]
           list = current.is_a?(Array) ? current.map(&:to_s) : current.to_s.split(',').map(&:strip)
           list.reject!(&:empty?)
-          list.include?(id.to_s) ? list.delete(id.to_s) : list << id.to_s
+          return on_clear_room(role, id) if list.include?(id.to_s)
+
+          list << id.to_s
           # A comma string, not an Array: the `rooms` cleaner splits a string,
           # and handed an Array it stringifies it -- ["101"] round-trips as
           # ["[\"101\"]"]. Every list-shaped setting here is stored as text.
-          on_change('hunting_boundaries', list.join(', '))
+          on_change(role, list.join(', '))
         when 'hunting_room_id', 'field_rest_room_id', 'resting_room_id'
-          on_change(role, settings[role].to_s == id.to_s ? '' : id)
+          # A click on the room that holds the role takes it away; a click
+          # anywhere else moves the role there.
+          return on_clear_room(role, id) if settings[role].to_s == id.to_s
+
+          on_change(role, id)
         else
           return note("#{role} is not a room role.", error: true)
         end
         @map = nil
         note("#{ROLE_LABELS.fetch(role, role)}: room #{id}.")
+      end
+
+      # Take a room out of a role.
+      # @param role [String] one of ROLE_LABELS' keys
+      # @param id [Integer] room id
+      # @return [Boolean] whether to re-render
+      def on_clear_room(role, id)
+        case role
+        when *LIST_ROLES
+          list = settings[role].to_s.split(',').map(&:strip).reject(&:empty?)
+          list.delete(id.to_s)
+          on_change(role, list.join(', '))
+        when 'hunting_room_id', 'field_rest_room_id', 'resting_room_id'
+          return note("Room #{id} is not the #{ROLE_LABELS.fetch(role).downcase}.") unless settings[role].to_s == id.to_s
+
+          on_change(role, '')
+        else
+          return note("#{role} is not a room role.", error: true)
+        end
+        @map = nil
+        note("#{ROLE_LABELS.fetch(role, role)} cleared: room #{id}.")
+      end
+
+      # Room roles and the colour each is drawn in on the map. More roles
+      # than the contract's four tones, so these are RGBA.
+      ROLE_COLOURS = {
+        'hunting'             => { 'r' => 30, 'g' => 150, 'b' => 50, 'a' => 0.95 },
+        'hunting_boundaries'  => { 'r' => 220, 'g' => 54, 'b' => 46, 'a' => 0.95 },
+        'hunting_room_id'     => { 'r' => 47, 'g' => 109, 'b' => 214, 'a' => 0.95 },
+        'rallypoint_room_ids' => { 'r' => 230, 'g' => 150, 'b' => 30, 'a' => 0.95 },
+        'field_rest_room_id'  => { 'r' => 138, 'g' => 79, 'b' => 201, 'a' => 0.6 },
+        'resting_room_id'     => { 'r' => 201, 'g' => 70, 'b' => 120, 'a' => 0.6 }
+      }.freeze
+
+      # How far the map can be zoomed: a range a player can get back from.
+      MAP_SCALE_RANGE = (0.4..4.0).freeze
+
+      # How much one zoom step changes it.
+      MAP_SCALE_STEP = 1.25
+
+      # @return [Float] the map's zoom, on top of fitting the hunt to the view
+      def map_scale = @map_scale || 1.0
+
+      # Zoom the map a step in or out, from the centre.
+      # @param direction [String] 'in' or 'out'
+      # @return [Boolean] whether to re-render
+      def on_map_zoom(direction)
+        factor = direction.to_s == 'out' ? (1.0 / MAP_SCALE_STEP) : MAP_SCALE_STEP
+        @map_scale = (map_scale * factor).round(3).clamp(MAP_SCALE_RANGE.begin, MAP_SCALE_RANGE.end)
+        true
+      end
+
+      # Back to the fitted size.
+      # @return [Boolean] whether to re-render
+      def on_map_reset_zoom
+        @map_scale = 1.0
+        true
+      end
+
+      # The window the page opens at, width and height, until a viewer
+      # reports its real size.
+      DEFAULT_WINDOW = [1180, 760].freeze
+
+      # What the page's padding, the map group's own padding and a scrollbar
+      # take from the window's width before the map view gets the rest.
+      MAP_CHROME_WIDTH = 96
+
+      # What the rail of pages takes beside the map.
+      RAIL_WIDTH = 240
+
+      # What sits above and below the map view: the page's toolbar, the
+      # step bar, the map's controls and legend, its status line.
+      MAP_CHROME_HEIGHT = 330
+
+      # The window as the viewer last reported it, set by the launcher before
+      # each refresh; nil until one has.
+      # @return [Hash{Symbol => Integer}, nil] width and height
+      attr_accessor :window_size
+
+      # How wide the map view is: the sheet is scaled to fill it.
+      # @return [Integer] pixels
+      def map_fit_width
+        width = (window_size&.dig(:width) || DEFAULT_WINDOW[0]) - MAP_CHROME_WIDTH
+        width -= RAIL_WIDTH
+        [width, 320].max
+      end
+
+      # How tall the map view may be before it scrolls.
+      # @return [Integer] pixels
+      def map_view_height
+        [(window_size&.dig(:height) || DEFAULT_WINDOW[1]) - MAP_CHROME_HEIGHT, 320].max
+      end
+
+      # Keep looking at this sheet until the viewer picks another. The map's
+      # rooms follow the walk, so a boundary taken away can send the walk
+      # onto other sheets; the one with the most rooms would then be shown,
+      # which is not the one being edited.
+      # @param sheet [String, nil] map image filename
+      # @return [void]
+      def keep_sheet(sheet)
+        @sheet ||= sheet unless sheet.to_s.empty?
+      end
+
+      # Which of the full editor's pages is being looked at. Only that one
+      # is drawn in full: drawing all fourteen on every refresh, the open
+      # map among them, made each tick a whole-page rebuild in the browser,
+      # and clicks that landed during the rebuild were lost.
+      # @return [Integer] index into Schema::PAGES
+      def page_index = @page_index || 0
+
+      # Look at another page.
+      # @param index [Integer]
+      # @return [Boolean] whether to re-render
+      def on_select_page(index)
+        index = index.to_i
+        return false if index.negative? || index == page_index
+
+        @page_index = index
+        true
+      end
+
+      # Look at a page by its id, as in NAV_ITEMS.
+      # @param id [String]
+      # @return [Boolean] whether to re-render
+      def on_show_page(id)
+        index = NAV_ITEMS.index { |item| item[:id] == id.to_s }
+        index ? on_select_page(index) : false
+      end
+
+      # --- What lives in the hunt's rooms, and the boons ---------------------
+
+      # @return [Array<Hash>] the boons the target reader knows: key, label,
+      #   adjectives and effect
+      def boon_abilities = Array(@boot[:boon_abilities] || @boot['boon_abilities'])
+
+      # Whether the aiming orders are shown on Combat routines. Off until
+      # asked for, like the map.
+      # @return [Boolean]
+      def aiming_open? = @aiming_open == true
+
+      # Show or hide them.
+      # @return [Boolean] whether to re-render
+      def on_toggle_aiming
+        @aiming_open = !aiming_open?
+        true
+      end
+
+      # Whether the creatures found in the hunt's rooms are listed. Off until
+      # asked for, like the map.
+      # @return [Boolean]
+      def creatures_open? = @creatures_open == true
+
+      # Show or hide that list.
+      # @return [Boolean] whether to re-render
+      def on_toggle_creatures
+        @creatures_open = !creatures_open?
+        true
+      end
+
+      # The creatures the templates place in the rooms the hunt walks now,
+      # by level then name. Empty when the hunt has no rooms yet.
+      # @return [Array<Hash>] name, level, undead
+      def creatures_here
+        rooms = Array(map && map[:hunting_room_ids])
+        return [] if rooms.empty?
+
+        if @creatures_here_for != rooms
+          @creatures_here_for = rooms
+          @creatures_here = Array(@app.call('action' => 'creatures_here', 'room_ids' => rooms))
+                            .sort_by { |creature| [creature[:level] || 999, creature[:name].to_s] }
+        end
+        @creatures_here
+      rescue StandardError => error
+        note(error.message, error: true)
+        []
+      end
+
+      # Whether any creature in the hunt's rooms is a boss type, which is
+      # what can carry boons.
+      # @return [Boolean]
+      def boss_here?
+        creatures_here.any? { |creature| creature[:boss] == true || !creature[:boss_type].to_s.empty? }
+      end
+
+      # Whether the boon settings are worth showing: a boss type is in the
+      # hunt's rooms, or a boon box already says something. Otherwise they
+      # are clutter.
+      # @return [Boolean]
+      def boons_relevant?
+        %w[boons_ignore boons_flee].any? { |key| !list_entries(key).empty? } || boss_here?
+      end
+
+      # Whether a creature is in a list: by its name, before any marker such
+      # as the (b) a target may carry.
+      # @param key [String] a list setting
+      # @param name [String] creature name
+      # @return [Boolean]
+      def listed?(key, name)
+        list_entries(key).any? { |entry| entry.split('(').first.strip.casecmp?(name.to_s) }
+      end
+
+      # Hunt a creature, or leave it alone: in one of the two lists and out
+      # of the other.
+      # @param name [String] creature name
+      # @param hunt [Boolean] true to hunt it, false to leave it alone
+      # @return [Boolean] whether to re-render
+      def on_hunt_creature(name, hunt)
+        add, drop = hunt ? %w[targets invalid_targets] : %w[invalid_targets targets]
+        write_list(drop, list_entries(drop).reject { |entry| entry.split('(').first.strip.casecmp?(name.to_s) })
+        write_list(add, (list_entries(add) + [name.to_s]).uniq) unless listed?(add, name)
+        note("#{name}: #{hunt ? 'hunting' : 'left alone'}.")
+      end
+
+      # Hunt every one of these: all into targets, none left in invalid_targets.
+      # @param names [Array<String>] creature names
+      # @return [Boolean] whether to re-render
+      def on_hunt_all(names)
+        names = Array(names).map(&:to_s).reject(&:empty?)
+        return false if names.empty?
+
+        write_list('invalid_targets', list_entries('invalid_targets').reject { |entry| names.any? { |name| entry.split('(').first.strip.casecmp?(name) } })
+        write_list('targets', (list_entries('targets') + names.reject { |name| listed?('targets', name) }).uniq)
+        note("Hunting all #{names.size} creatures here.")
+      end
+
+      # Whether the known boons are shown under a boon box.
+      # @param key [String] 'boons_ignore' or 'boons_flee'
+      # @return [Boolean]
+      def boons_open?(key) = Array(@boons_open).include?(key.to_s)
+
+      # Show or hide the known boons under a boon box.
+      # @return [Boolean] whether to re-render
+      def on_toggle_boons(key)
+        @boons_open = Array(@boons_open)
+        boons_open?(key) ? @boons_open.delete(key.to_s) : @boons_open << key.to_s
+        true
+      end
+
+      # Put a boon in a boon list, or take it out.
+      # @param key [String] 'boons_ignore' or 'boons_flee'
+      # @param boon [String] the target reader's ability name
+      # @param on [Boolean]
+      # @return [Boolean] whether to re-render
+      def on_toggle_boon(key, boon, on)
+        entries = list_entries(key).reject { |entry| entry.casecmp?(boon.to_s) }
+        entries << boon.to_s if on
+        write_list(key, entries)
+      end
+
+      # Every place name the map knows, for filling in as the viewer types.
+      # @return [Array<Hash>] name and image
+      def area_names
+        @area_names ||= Array(@app.call('action' => 'area_names'))
+      rescue StandardError
+        @area_names = []
+      end
+
+      # @return [String] what was last typed into the map's finder
+      def room_query = @room_query.to_s
+
+      # What is in the finder now, kept so a redraw while typing does not
+      # take it away; the search itself waits for the typing to pause.
+      # @param text [String]
+      def room_query=(text)
+        @room_query = text.to_s
+      end
+
+      # @return [Array<Hash>] the rooms the finder found, when more than one
+      def room_matches = Array(@room_matches)
+
+      # Find where to look: a place name goes straight to its sheet; anything
+      # else is looked for in room titles, and a single find is shown, while
+      # several are offered to choose from.
+      # @param query [String] a place name, part of a room title, an id or uNNNN
+      # @return [Boolean] whether to re-render
+      def on_find_room(query)
+        @room_query = query.to_s.strip
+        @room_matches = []
+        @sheet_choices = []
+        return note('Type a place or room name to find.') if @room_query.empty?
+
+        # A place name as filled in, or the one place whose name contains
+        # what was typed, before any room title.
+        place = area_names.find { |entry| entry[:name].to_s.casecmp?(@room_query) }
+        place ||= area_names.select { |entry| entry[:name].to_s.downcase.include?(@room_query.downcase) }.then { |some| some.first if some.size == 1 }
+        return show_sheet(place[:image], "Showing #{place[:name]}.") if place
+
+        found = Array(@app.call('action' => 'room_search', 'query' => @room_query))
+        return note("No room with #{@room_query} in its title.", error: true) if found.empty?
+        return on_go_to_room(found.first[:id], found) if found.size == 1 || found.map { |room| room[:image] }.uniq.size == 1
+
+        @room_matches = found
+        note("#{found.size} rooms found; pick one.")
+      rescue StandardError => error
+        note(error.message, error: true)
+      end
+
+      # Show the sheet a found room is on, with the view on that room.
+      # @param id [Integer] room id
+      # @param among [Array<Hash>] the finds it is one of
+      # @return [Boolean] whether to re-render
+      def on_go_to_room(id, among = room_matches)
+        room = among.find { |entry| entry[:id].to_i == id.to_i }
+        return note("Room #{id} is not one of the finds.", error: true) unless room
+
+        @room_matches = []
+        @map_anchor = room[:id]
+        show_sheet(room[:image], "Showing #{room[:title]} (#{room[:id]}).")
+      end
+
+      # The room the next fresh draw of the map scrolls to, taken once.
+      # @return [Integer, nil]
+      def take_map_anchor
+        anchor = @map_anchor
+        @map_anchor = nil
+        anchor
+      end
+
+      private
+
+      def show_sheet(image, message)
+        @sheet = image.to_s
+        @sheet_choices = []
+        @map = nil
+        @map_frame = nil
+        note(message)
+      end
+
+      public
+
+      # Whether the creature search is shown on Where to hunt. Off until
+      # asked for, like the map.
+      # @return [Boolean]
+      def creature_search_open? = @creature_search_open == true
+
+      # Show or hide it.
+      # @return [Boolean] whether to re-render
+      def on_toggle_creature_search
+        @creature_search_open = !creature_search_open?
+        true
+      end
+
+      # The sheets a found creature lives on, when there is more than one
+      # to choose from. See #on_find_creature.
+      # @return [Array<Hash>] id and name
+      def sheet_choices = Array(@sheet_choices)
+
+      # A creature was picked in the search: open the map on the sheet its
+      # rooms are drawn on. On one sheet, that sheet; on several, they are
+      # offered beside the Find box and the sheet stays as it was. Nothing
+      # is written to the draft: rooms come from clicking the map, creatures
+      # from the list on What to hunt.
+      # @param name [String] the creature's name
+      # @return [Boolean] whether to re-render
+      def on_find_creature(name)
+        wanted = name.to_s
+        return false if wanted.empty?
+
+        sheets = Array(@app.call('action' => 'creature_sheets', 'name' => wanted))
+        return note("No mapped rooms are recorded for #{wanted}.", error: true) if sheets.empty?
+
+        @room_query = wanted
+        @room_matches = []
+        @map_open = true
+        if sheets.size == 1
+          show_sheet(sheets.first[:id], "Showing #{sheets.first[:name]}, where #{wanted} lives.")
+        else
+          @sheet_choices = sheets
+          note("#{wanted} lives on #{sheets.size} sheets; pick one.")
+        end
+      rescue StandardError => error
+        note(error.message, error: true)
+      end
+
+      # Whether the map is drawn. Off until asked for: a sheet is hundreds of
+      # layers, and every tab is rendered on every refresh.
+      # @return [Boolean]
+      def map_open? = @map_open == true
+
+      # Show or hide the map.
+      # @return [Boolean] whether to re-render
+      def on_toggle_map
+        @map_open = !map_open?
+        @map = nil unless @map_open
+        @map_frame = nil
+        true
+      end
+
+      # @return [String] the role a left-click on the map assigns
+      def assign_role = @assign_role ||= 'hunting_room_id'
+
+      # Choose what a left-click assigns.
+      # @param role [String] one of ROLE_LABELS' keys, bar the derived 'hunting'
+      # @return [Boolean] whether to re-render
+      def on_assign_role(role)
+        wanted = role.to_s
+        return note("#{wanted} is not a room role.", error: true) unless ROLE_LABELS.key?(wanted) && wanted != 'hunting'
+
+        @assign_role = wanted
+        true
+      end
+
+      # Where the drawn surface's top-left sits on the sheet, set by the
+      # page when it crops the sheet to the hunt, so a click's coordinates
+      # can be turned back into a room.
+      attr_accessor :map_origin
+
+      # The crop the map shows, chosen when the map opens or is refitted
+      # and kept through every click after: marking a room must not move
+      # the view the viewer is marking rooms on.
+      attr_accessor :map_frame
+
+      # A click on the map. Left assigns the chosen role; right clears
+      # whatever role the room holds, so a room comes out of the hunt without
+      # first choosing the role it happens to be in.
+      # @param region [String, nil] the clicked region key, "room-<id>"
+      # @param button [String] 'primary' or 'secondary'
+      # @param point [Hash, nil] where on the surface, when no region was hit
+      # @return [Boolean] whether to re-render
+      def on_map_click(region, button, point = nil)
+        id = region.to_s[/\Aroom-(\d+)\z/, 1]&.to_i
+        # A left-click on a room arrives as the region's own event. A client
+        # that also reports it as a surface click is reporting the same
+        # click twice, and the second would undo the first.
+        return false if id && button.to_s != 'secondary' && point
+
+        id ||= room_at(point)
+        return false unless id
+        return on_assign_room(assign_role, id) unless button.to_s == 'secondary'
+
+        role = role_for(id)
+        return note("Room #{id} has no mark to clear.") unless role && role != 'hunting'
+
+        on_clear_room(role, id)
+      end
+
+      # Which room covers a point on the surface, which is the sheet's
+      # coordinate less the crop's origin.
+      # @param point [Hash, nil] x and y on the surface
+      # @return [Integer, nil] room id
+      def room_at(point)
+        return nil unless point.is_a?(Hash)
+
+        x = point[:x] || point['x']
+        y = point[:y] || point['y']
+        current = map
+        return nil if x.nil? || y.nil? || current.nil?
+
+        origin = @map_origin || { x: 0, y: 0 }
+        sheet_x = x.to_i + origin[:x].to_i
+        sheet_y = y.to_i + origin[:y].to_i
+        Array(current[:rooms]).find do |room|
+          box = room[:image_coords]
+          next false unless box
+
+          sheet_x.between?([box[0], box[2]].min, [box[0], box[2]].max) &&
+            sheet_y.between?([box[1], box[3]].min, [box[1], box[3]].max)
+        end&.dig(:id)
       end
 
       # @return [Array<Hash>] errors from the last validation
@@ -1349,17 +1208,6 @@ module EO
       end
 
       private
-
-      # A plain-language account of what an area resolution produced,
-      # including what it could not resolve.
-      def area_summary
-        rooms = Array(@area[:room_ids]).size
-        bounds = Array(@area[:boundary_ids]).size
-        parts = ["#{@area_name}: #{rooms} rooms, #{bounds} boundaries"]
-        parts << 'a named subarea is required before rooms can be suggested' if @area[:zone_selection_required]
-        parts << 'incomplete: some rooms or UIDs did not resolve' unless @area[:complete]
-        "#{parts.join('; ')}. Not field-verified."
-      end
 
       def refresh_boot
         @boot = @app.call('action' => 'bootstrap')

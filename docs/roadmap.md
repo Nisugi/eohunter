@@ -17,7 +17,7 @@ working in a real hunt; **gap** means not written yet.
 | P2 parser seam | not started | widen Combat::Observers; the engine's Watch does the job for now |
 | M0 spike | done, live | hunt-rest-hunt on a real profile |
 | M1 solo parity | built, partly live | the checklist below |
-| Setup editor | built, partly live | `;eohunter setup`: a GTK hunt editor with Bigshot import, validation against the engine, and routine and custom-Ruby checks |
+| Setup editor | built, partly live | `;eohunter setup`: a WebUI hunt editor, every setting on its page, with Bigshot import, validation against the engine, and routine and custom-Ruby checks |
 | L3 libeosettings | not started | Setup scaffold for the e-scripts; independent of eohunter |
 | M3 group | built, not live | head and tail, every follower wait, the looter, orders over DRb |
 | M4 bounty child | built, not live | `;eohunter bounty` in place of `bigshot bounty`; the group verdict and acknowledged shutdown; ebounty stays the driver and gets the group changes |

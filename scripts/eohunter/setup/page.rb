@@ -1,0 +1,1267 @@
+# frozen_string_literal: true
+
+require 'digest'
+
+module EO
+  module HunterSetup
+    # The editor, drawn through Lich's WebUI.
+    #
+    # A render function over Editor: the whole page is rebuilt from the
+    # editor's state on every refresh, and every control hands what it holds
+    # to the Session, which calls the editor's +on_*+ method and refreshes.
+    # Which control a setting gets, and how its text becomes a value, is
+    # Form's business.
+    #
+    # Nothing here reaches into Lich. The builder is Lich's TreeBuilder in
+    # the game and a recording stand-in in the specs, so the page can be
+    # rendered and its wiring checked without a browser.
+    #
+    # Every setting, a page per tab, with the map and the creature search
+    # on Where to hunt and the creatures found in the hunt's rooms on What
+    # to hunt.
+    module Page
+      # A picker value meaning "none of these, I will type it". The hand and
+      # ammunition pickers are editable selects now, so what is typed is the
+      # value, but Editor#on_equipment still names this.
+      OTHER = '__other__'
+
+      # The window's opening size: a vertical tab rail plus a settings page
+      # beside it without wrapping.
+      WINDOW_SIZE = Editor::DEFAULT_WINDOW
+
+      # Settings whose entries are creature names, which the chosen area can
+      # fill in.
+      CREATURE_LISTS = Schema::CREATURE_LIST_KEYS
+
+      # Settings whose entries are room numbers.
+      ROOM_LISTS = %w[hunting_boundaries rallypoint_room_ids].freeze
+
+      # The full editor's tabs: every settings page, then the two that are
+      # not settings.
+      PAGES = Editor::NAV_ITEMS.freeze
+
+      # Width of a one-line control, in characters. A room number does not
+      # need the whole window.
+      CONTROL_WIDTH = 28
+
+      # How wide a box for a number is: room for a few digits and a sign.
+      NUMBER_WIDTH = 8
+
+      # Each settings page's headings and the settings under them, in the
+      # order they are drawn. A setting the page has and this does not name
+      # is drawn under a last heading, so a field added to the schema is
+      # never hidden.
+      GROUPS = {
+        'area'         => [
+          ['Rooms', %w[hunting_room_id hunting_boundaries rallypoint_room_ids]]
+        ],
+        'creatures'    => [
+          ['What to hunt', %w[targets invalid_targets always_flee_from quickhunt_targets]],
+          ['Boon creatures', %w[boons_ignore boons_flee]]
+        ],
+        'hunting'      => [
+          ['Stance', %w[hunting_stance wander_stance]],
+          ['Targets and leaving', %w[flee_count wander_wait flee_message lone_targets_only priority]],
+          ['Room hazards', %w[flee_clouds flee_vines flee_webs flee_voids ignore_disks]],
+          ['Looting', %w[loot_script delay_loot loot_stance final_loot]],
+          ['Moving about', %w[sneaky_sneaky box_in_hand]]
+        ],
+        'rest'         => [
+          ['Rest room', %w[resting_room_id return_waypoint_ids resting_commands resting_scripts after_town_rest]],
+          ['Rested enough', %w[rest_till_exp rest_till_mana rest_till_spirit rest_till_percentstamina]]
+        ],
+        'field'        => [
+          ['Getting home', %w[fog_return custom_fog fog_optional fog_rift]],
+          ['Field rest', %w[field_rest_room_id field_rest_for town_rest_required_eval field_rest_commands field_rest_scripts
+                            field_hunting_prep_commands field_rest_timeout_seconds field_return_waypoint_ids
+                            field_rallypoint_room_ids]]
+        ],
+        'monitoring'   => [
+          ['Thresholds', %w[fried overkill lte_boost oom encumbered encumbrance_grace_seconds]],
+          ['Injuries', %w[wounded_eval creeping_dread crushing_dread wot_poison confusion]]
+        ],
+        'combat'       => [
+          ['Routines', %w[hunting_commands hunting_commands_b hunting_commands_c hunting_commands_d
+                          hunting_commands_e hunting_commands_f hunting_commands_g hunting_commands_h
+                          hunting_commands_i hunting_commands_j quick_commands disable_commands]],
+          ['Aiming', %w[ambush archery_aim aim]]
+        ],
+        'unarmed'      => [
+          ['Unarmed combat', %w[tier3 uac_smite uac_mstrike]],
+          ['MSTRIKE', %w[mstrike_mob mstrike_cooldown mstrike_stamina_cooldown mstrike_quickstrike mstrike_stamina_quickstrike]]
+        ],
+        'preparations' => [
+          ['Scripts', %w[hunting_prep_commands hunting_scripts]],
+          ['Confirmed preparations', %w[preparations]]
+        ],
+        'equipment'    => [
+          ['Hands', %w[hunting_right_hand hunting_left_hand hunting_aim]],
+          ['Ammunition', %w[ammo ammo_container]],
+          ['Wands', %w[wand wand_if_oom fresh_wand_container dead_wand_container]],
+          ['Loadouts', %w[hunting_loadout_sets hunting_loadout_rules]]
+        ],
+        'buffs'        => [
+          ['Upkeep', %w[signs bless combat_buffs]],
+          ['Society', %w[use_wracking wracking_spirit check_favor]]
+        ],
+        'recovery'     => [
+          ['Standing and death', %w[stand_stance dead_man_switch depart_switch]],
+          ['Cleanse', %w[recovery]],
+          ['Legacy switches', %w[pull deader weapon_reaction troubadours_rally]]
+        ],
+        'team'         => [
+          ['Travel', %w[independent_travel independent_return group_strict_movement]],
+          ['Looting', %w[ma_looter never_loot random_loot]],
+          ['Coordination', %w[group_deader quiet_followers group_fried_trigger]]
+        ]
+      }.freeze
+
+      # Seconds a condition may run before Test now gives up on it.
+      TEST_LIMIT = 5
+
+      module_function
+
+      # Draw the page.
+      #
+      # @param ui [#component] the tree builder
+      # @param editor [Editor] the editing session
+      # @param session [#call, #test_results] handles events: called with the
+      #   handler name, the event and any curried arguments
+      # @return [void]
+      def render(ui, editor, session)
+        ui.stack(key: 'root', gap: 8, margin: 10) do
+          Page.toolbar(ui, editor, session)
+          Page.status(ui, editor, session)
+          Page.full(ui, editor, session)
+        end
+      end
+
+      # A handler bound to one control: the session is called with the name,
+      # the event and the curried arguments.
+      def on(session, name, *args)
+        proc { |event| session.call(name, event, *args) }
+      end
+
+      # The bar above everything, in two rows. The first picks what to work
+      # on and names it; the second says what the editor last did, with the
+      # draft's buttons at its end. Nothing in it takes a row of its own.
+      def toolbar(ui, editor, session)
+        ui.columns(key: 'hunt-bar', count: 4, weights: [0, 0, 0, 1], compact: true, row_align: :end) do
+          ui.select(slot: '0', key: 'hunts', label: 'Hunt', options: Page.name_options(editor.profiles, 'Saved hunts'),
+                    value: editor.profiles.include?(editor.name) ? editor.name : '', control_width_chars: 20,
+                    tooltip: 'Hunts saved by eohunter. Choosing one opens it.',
+                    on: { change: Page.on(session, :load) })
+          ui.select(slot: '1', key: 'bigshot', label: 'Bigshot', options: Page.name_options(editor.legacy_profiles, 'Import a profile'),
+                    value: '', control_width_chars: 20,
+                    tooltip: 'Bigshot profiles, opened as an unsaved copy. The original is never written.',
+                    on: { change: Page.on(session, :copy_legacy) })
+          ui.button(slot: '2', key: 'new', label: 'New', tooltip: 'Start an empty hunt',
+                    on: { activate: Page.on(session, :new) })
+          ui.text_input(slot: '3', key: 'name', label: 'Name', value: editor.name.to_s, placeholder: 'name this hunt',
+                        tooltip: 'Saving under a new name creates a new hunt and leaves the original alone.',
+                        on: { change: Page.on(session, :rename) })
+        end
+      end
+
+      # What the editor last said and whether anything is unsaved, with the
+      # draft's buttons on the same row.
+      def status(ui, editor, session)
+        content = editor.status.to_s
+        content = 'Open a hunt, import a Bigshot profile, or start a new one.' if content.empty?
+        ui.columns(key: 'draft-bar', count: 5, weights: [1, 0, 0, 0, 0], compact: true, row_align: :center) do
+          ui.text(slot: '0', key: 'said', content: content, tone: editor.status_error ? :danger : :neutral,
+                  emphasis: editor.status_error ? :strong : :normal)
+          ui.text(slot: '1', key: 'dirty', content: editor.dirty? ? 'Unsaved changes' : 'Saved',
+                  tone: editor.dirty? ? :caution : :neutral, emphasis: :subtle)
+          ui.button(slot: '2', key: 'validate', label: 'Validate', tooltip: 'Check the draft against the installed engine',
+                    on: { activate: Page.on(session, :validate) })
+          ui.button(slot: '3', key: 'save', label: 'Save', variant: :primary, tooltip: 'Write the hunt. Saving does not start it.',
+                    on: { activate: Page.on(session, :save) })
+          ui.button(slot: '4', key: 'revert', label: 'Revert', tooltip: 'Discard the unsaved edits',
+                    on: { activate: Page.on(session, :revert) })
+        end
+        ui.divider(key: 'rule')
+      end
+
+      # --- The full editor --------------------------------------------------
+
+      # Every setting, a page per tab, with a search across all of them.
+      def full(ui, editor, session)
+        ui.text_input(key: 'search', value: editor.query, search: true, placeholder: 'Find a setting by name or what it does',
+                      on: { change: Page.on(session, :search) })
+        return Page.search_results(ui, editor, session) unless editor.query.empty?
+
+        ui.tabs(key: 'pages', names: PAGES.map { |item| item[:label] }, vertical: true, selected: editor.page_index,
+                on: { select: Page.on(session, :select_page) }) do
+          # No scroll region around a tab's body: one with nothing to size it
+          # measures as zero in the browser and the tab draws empty. The
+          # window scrolls instead.
+          PAGES.each_with_index do |item, index|
+            ui.stack(slot: item[:label], key: item[:id], gap: 10, margin: { left: 12, right: 4 }) do
+              # Only the page being looked at is drawn; the others are empty
+              # until chosen. See Editor#page_index.
+              next unless index == editor.page_index
+
+              case item[:id]
+              when 'manage' then Page.manage(ui, editor, session)
+              when 'review' then Page.review(ui, editor, session)
+              when 'area'
+                Page.creature_finder(ui, editor, session)
+                Page.area_map(ui, editor, session)
+                Page.settings(ui, editor, editor.fields_for(item[:id]), session)
+              when 'creatures'
+                Page.creatures_here(ui, editor, session)
+                # Boons belong to boss-type creatures. With none in the
+                # hunt's rooms and nothing in the boxes, the boon settings
+                # are clutter and stay out of the way.
+                fields = editor.fields_for(item[:id])
+                fields = fields.reject { |field| %w[boons_ignore boons_flee].include?(field['key']) } unless editor.boons_relevant?
+                Page.settings(ui, editor, fields, session)
+                Page.boon_pickers(ui, editor, session)
+              when 'combat' then Page.combat(ui, editor, session)
+              else Page.settings(ui, editor, editor.fields_for(item[:id]), session)
+              end
+            end
+          end
+        end
+      end
+
+      # The settings matching the search box.
+      def search_results(ui, editor, session)
+        found = editor.search_results
+        ui.group(key: 'found', label: found.empty? ? 'No setting matches' : "#{found.size} matching setting#{'s' if found.size != 1}") do
+          ui.stack(key: 'list', gap: 10) do
+            found.each { |field| Page.field_row(ui, editor, field, session) }
+          end
+        end
+      end
+
+      # A page of settings: the usual ones under their headings, then the
+      # advanced ones folded away.
+      def settings(ui, editor, fields, session)
+        # Every setting in its group, none folded away: what the schema
+        # flags as advanced is ordinary to the people using this.
+        Page.grouped(fields).each_with_index do |(heading, members), index|
+          ui.group(key: "g#{index}", label: heading, presentation_role: :form) do
+            Page.rows(ui, editor, members, session)
+          end
+        end
+      end
+
+      # The page's fields under their headings, in GROUPS order, with what
+      # GROUPS does not name under a last heading so nothing is lost.
+      # @return [Array<Array(String, Array<Hash>)>]
+      def grouped(fields)
+        page = fields.first && fields.first['page']
+        by_key = fields.to_h { |field| [field['key'], field] }
+        placed = {}
+        groups = Array(GROUPS[page]).filter_map do |(heading, keys)|
+          members = keys.filter_map { |key| by_key[key] }
+          members.each { |field| placed[field['key']] = true }
+          [heading, members] unless members.empty?
+        end
+        rest = fields.reject { |field| placed[field['key']] }
+        groups << [groups.empty? ? 'Settings' : 'Other', rest] unless rest.empty?
+        groups
+      end
+
+      # Fields in order, with short controls two to a row so a page is not a
+      # single column of boxes stretched across the window.
+      def rows(ui, editor, fields, session)
+        pending = []
+        flush = lambda do
+          case pending.size
+          when 1 then Page.field_row(ui, editor, pending.first, session)
+          when 2
+            # Like beside like: two boxes share a row with their labels
+            # level, two ticks share a row. A tick beside a box sat at a
+            # different height from it and read as misplaced.
+            ticks = Page.short?(editor, pending.first) == :tick
+            ui.columns(key: "r-#{pending.first['key']}", count: 2, weights: [1, 1], gap: 16, row_align: ticks ? :center : :end) do
+              pending.each_with_index { |field, index| Page.field_row(ui, editor, field, session, slot: index.to_s) }
+            end
+          end
+          pending.clear
+        end
+        fields.each do |field|
+          shape = Page.short?(editor, field)
+          if shape
+            flush.call if pending.any? && Page.short?(editor, pending.first) != shape
+            pending << field
+            flush.call if pending.size == 2
+          else
+            flush.call
+            Page.field_row(ui, editor, field, session)
+          end
+        end
+        flush.call
+      end
+
+      # What shape a one-line control has, for pairing: a tick, a box with
+      # its label above it, or nil for one that is taller.
+      # @return [Symbol, nil] :tick, :box or nil
+      def short?(editor, field)
+        case Form.kind(editor, field)
+        when :check then :tick
+        when :choice, :entry, :equipment then :box
+        end
+      end
+
+      # One setting: its control, then what validation said about it. What
+      # the setting does is in the control's tooltip, not on the page.
+      def field_row(ui, editor, field, session, slot: nil)
+        key = field['key']
+        ui.stack(key: "f-#{key}", slot: slot, gap: 2) do
+          Page.control(ui, editor, field, session)
+          Form.messages(editor, key).each_with_index do |message, index|
+            ui.text(key: "m#{index}", content: message, tone: :danger, emphasis: :subtle)
+          end
+        end
+      end
+
+      # The control a setting gets, from Form.kind.
+      def control(ui, editor, field, session)
+        key = field['key']
+        value = editor.settings[key]
+        label = Form.label(field)
+        tip = Form.tooltip(editor, field)
+        case Form.kind(editor, field)
+        when :check
+          ui.checkbox(key: key, label: label, checked: value == true, tooltip: tip,
+                      on: { change: Page.on(session, :change, key) })
+        when :choice
+          options = Form.choices(field, value)
+          ui.select(key: key, label: label, tooltip: tip, control_width_chars: CONTROL_WIDTH,
+                    options: options.map { |(id, text)| { value: id, label: text } },
+                    value: Form.chosen(options, value) || '',
+                    on: { change: Page.on(session, :change, key) })
+        when :equipment
+          ui.select(key: key, label: label, tooltip: tip, editable: true, control_width_chars: CONTROL_WIDTH,
+                    options: Page.equipment_options(editor.equipment_options(key)),
+                    value: value.to_s, placeholder: 'as it appears in your inventory',
+                    on: { change: Page.on(session, :change, key) })
+        when :ruby
+          Page.ruby(ui, editor, field, session)
+        when :list
+          Page.list(ui, editor, field, session)
+        when :text_block
+          text = Form.text(value)
+          ui.textarea(key: key, label: field['type'] == 'structured' ? "#{label} (YAML)" : label, tooltip: tip,
+                      value: text, rows: Page.rows_for(text), wrap: :none,
+                      on: { blur: Page.on(session, :change, key) })
+        else
+          text = Form.text(value)
+          # A number is a few digits and gets a box that size; a creature
+          # list runs the width of the page like its neighbours.
+          width = if %w[integer number].include?(field['type']) then NUMBER_WIDTH
+                  elsif CREATURE_LISTS.include?(key) then nil
+                  else CONTROL_WIDTH
+                  end
+          placeholder = if CREATURE_LISTS.include?(key) then 'comma separated'
+                        elsif width == NUMBER_WIDTH && !Form.units(field).empty? then Form.units(field)
+                        else 'unset'
+                        end
+          ui.text_input(key: Page.box_key(key, text), label: label, tooltip: tip, value: text,
+                        placeholder: placeholder,
+                        **(width ? { control_width_chars: width } : {}),
+                        on: { change: Page.on(session, :change, key) })
+        end
+      end
+
+      # The key of a box the map writes to. The browser keeps what a viewer
+      # typed in a box across redraws, by the box's identity, and can put
+      # that back over what the map just set. A box the map writes carries
+      # its value in its identity, so a value the map changes is a new box
+      # with nothing to put back; a box the map does not touch keeps its
+      # identity, and the typing in it.
+      def box_key(key, text)
+        return key unless Geography::MAP_SETTINGS.include?(key) || CREATURE_LISTS.include?(key)
+
+        "#{key}-#{Digest::SHA256.hexdigest(text.to_s)[0, 8]}"
+      end
+
+      # A Ruby condition, with a button that runs it where the hunt would.
+      def ruby(ui, editor, field, session)
+        key = field['key']
+        ui.columns(key: key, count: 2, weights: [1, 0], row_align: :end) do
+          ui.text_input(slot: '0', key: 'code', label: Form.label(field), tooltip: Form.tooltip(editor, field),
+                        value: Form.text(editor.settings[key]), placeholder: 'unset',
+                        on: { change: Page.on(session, :change, key) })
+          ui.button(slot: '1', key: 'test', label: 'Test now',
+                    tooltip: 'Run this condition now, as the hunt would, and show what it says. ' \
+                             'It reads your character as they are at this moment.',
+                    on: { activate: Page.on(session, :test_condition, key) })
+        end
+        result = session.test_results[key]
+        ui.text(key: "#{key}-result", content: result.to_s, emphasis: :subtle) if result
+      end
+
+      # A comma list, one entry per line.
+      def list(ui, editor, field, session)
+        key = field['key']
+        text = editor.list_entries(key).join(', ')
+        ui.text_input(key: Page.box_key(key, text), label: Form.label(field), tooltip: Form.tooltip(editor, field),
+                      value: text, placeholder: 'comma separated',
+                      on: { change: Page.on(session, :list_set_all, key) })
+      end
+
+      # The routine settings and the word beside each box: a letter for the
+      # creature routines, then the two special sequences.
+      ROUTINE_WORDS = GROUPS['combat'][0][1].to_h do |key|
+        word = case key
+               when 'hunting_commands' then 'a'
+               when 'quick_commands' then 'Quick'
+               when 'disable_commands' then 'Fried'
+               else key[-1]
+               end
+        [key, word]
+      end.freeze
+
+      # The aiming settings and the word each is known by.
+      AIM_LABELS = { 'ambush' => 'Ambush', 'archery_aim' => 'Ranged', 'aim' => 'Unarmed' }.freeze
+
+      # The Combat routines page: every routine as one lettered list, and
+      # the aiming orders behind a button.
+      def combat(ui, editor, session)
+        fields = editor.fields_for('combat').to_h { |field| [field['key'], field] }
+        ui.group(key: 'routines', label: 'Routines', presentation_role: :form) do
+          ui.text(key: 'hint', emphasis: :subtle,
+                  content: 'Routine a is the usual one; a creature marked (b) in Creatures to hunt uses b, and so on. ' \
+                           'Quick is for quick-hunt creatures, Fried for when the mind is full.')
+          Page.lettered(ui, editor, ROUTINE_WORDS.filter_map { |key, word| [fields[key], word] if fields[key] }, session)
+        end
+        Page.aiming(ui, editor, fields, session)
+      end
+
+      # The aiming orders, behind a button: most hunts never set one.
+      def aiming(ui, editor, fields, session)
+        unless editor.aiming_open?
+          ui.columns(key: 'show-aiming-row', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'show-aiming', label: 'Show aiming',
+                      tooltip: 'The body parts to aim at when ambushing, firing or fighting unarmed.',
+                      on: { activate: Page.on(session, :toggle_aiming) })
+          end
+          return
+        end
+
+        ui.group(key: 'aiming', label: 'Aiming', presentation_role: :form) do
+          Page.lettered(ui, editor, AIM_LABELS.filter_map { |key, word| [fields[key], word] if fields[key] }, session,
+                        placeholder: 'body parts, comma separated')
+          ui.columns(key: 'aiming-buttons', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'hide-aiming', label: 'Hide', on: { activate: Page.on(session, :toggle_aiming) })
+          end
+        end
+      end
+
+      # Comma-list settings as one list: a short word beside each box
+      # instead of a label above it. One grid, so the words share a column
+      # and every box starts at the same place and runs to the edge.
+      # @param rows [Array<Array(Hash, String)>] each field and its word
+      def lettered(ui, editor, rows, session, placeholder: 'comma separated')
+        ui.grid(key: 'lettered', cols: 2, homogeneous: false, expand_columns: [2], gap: 8) do
+          rows.each do |field, word|
+            key = field['key']
+            text = editor.list_entries(key).join(', ')
+            tip = Form.tooltip(editor, field)
+            ui.text(key: "w-#{key}", content: word, tooltip: tip)
+            ui.stack(key: "f-#{key}", gap: 2) do
+              ui.text_input(key: Page.box_key(key, text), tooltip: tip, value: text, placeholder: placeholder,
+                            on: { change: Page.on(session, :list_set_all, key) })
+              Form.messages(editor, key).each_with_index do |message, index|
+                ui.text(key: "m#{index}", content: message, tone: :danger, emphasis: :subtle)
+              end
+            end
+          end
+        end
+      end
+
+      # The creatures the templates put in the rooms the hunt walks, each
+      # with a tick for hunting it. Behind a button, like the map.
+      def creatures_here(ui, editor, session)
+        unless editor.creatures_open?
+          # In a natural-width column: a bare button in a stack is drawn
+          # the full width of the page.
+          ui.columns(key: 'show-creatures-row', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'show-creatures', label: 'Show the creatures here',
+                      tooltip: 'What the creature data places in the rooms this hunt walks, and a tick for each.',
+                      on: { activate: Page.on(session, :toggle_creatures) })
+          end
+          return
+        end
+
+        ui.group(key: 'here', label: 'Creatures in the hunt\'s rooms') do
+          creatures = editor.creatures_here
+          if creatures.empty?
+            ui.text(key: 'none', emphasis: :subtle,
+                    content: 'No rooms yet, or nothing is recorded in them. Set the start room and boundaries on Where to hunt first.')
+          else
+            ui.text(key: 'hint', emphasis: :subtle,
+                    content: 'Ticked goes in Creatures to hunt; unticked goes in Creatures to ignore. ' \
+                             'Neither until you tick or untick it.')
+            ui.collection(creatures) do |creature, _|
+              name = creature[:name].to_s
+              level = creature[:level] ? "level #{creature[:level]}" : 'level unknown'
+              traits = creature[:undead] ? ', undead' : ''
+              boss = creature[:boss_type].to_s
+              boss = 'boss' if boss.empty? && creature[:boss] == true
+              traits += ", #{boss}" unless boss.empty?
+              ui.columns(key: Page.row_key('c', name), count: 2, weights: [0, 1], compact: true, row_align: :center) do
+                ui.checkbox(slot: '0', key: 'hunt', label: name, checked: editor.listed?('targets', name),
+                            tooltip: editor.listed?('invalid_targets', name) ? 'In Creatures to ignore.' : "Tick to hunt #{name}.",
+                            on: { change: Page.on(session, :hunt_creature, name) })
+                ui.text(slot: '1', key: 'about', content: "#{level}#{traits}", emphasis: :subtle)
+              end
+            end
+          end
+          ui.columns(key: 'here-buttons', count: 2, weights: [0, 0], compact: true) do
+            unless creatures.empty?
+              ui.button(slot: '0', key: 'hunt-all', label: 'Hunt all of these',
+                        tooltip: 'Tick every creature here: all into Creatures to hunt, none left in Creatures to ignore.',
+                        on: { activate: Page.on(session, :hunt_all, creatures.map { |creature| creature[:name].to_s }) })
+            end
+            ui.button(slot: '1', key: 'hide-creatures', label: 'Hide', on: { activate: Page.on(session, :toggle_creatures) })
+          end
+        end
+      end
+
+      # The boons the target reader knows, under each boon box, each with
+      # the ASSESS words that reveal it, what it does, and a tick that puts
+      # it in that box. Behind a button per box.
+      def boon_pickers(ui, editor, session)
+        boons = editor.boon_abilities
+        return if boons.empty?
+
+        unless editor.boons_relevant?
+          ui.text(key: 'no-boons', emphasis: :subtle,
+                  content: 'No boss-type creatures in these rooms. The boon settings appear when there are.')
+          return
+        end
+
+        ui.columns(key: 'boon-buttons', count: 2, weights: [0, 0], compact: true) do
+          { 'boons_ignore' => 'avoid', 'boons_flee' => 'flee from' }.each_with_index do |(key, verb), index|
+            ui.button(slot: index.to_s, key: "show-#{key}", label: "#{editor.boons_open?(key) ? 'Hide' : 'Pick'} boons to #{verb}",
+                      tooltip: 'Every boon the hunter can read from ASSESS, with what it does.',
+                      on: { activate: Page.on(session, :toggle_boons, key) })
+          end
+        end
+        %w[boons_ignore boons_flee].each do |key|
+          next unless editor.boons_open?(key)
+
+          ui.group(key: "pick-#{key}", label: key == 'boons_ignore' ? 'Boons to avoid targeting' : 'Boons to flee from') do
+            ui.text(key: 'source', emphasis: :subtle,
+                    content: 'What each does is from the wiki\'s boss creature page, which says its notes may be inaccurate.')
+            ui.collection(boons) do |boon, _|
+              ui.columns(key: boon[:key].to_s, count: 2, weights: [0, 1], compact: true, row_align: :center) do
+                ui.checkbox(slot: '0', key: 'tick', label: boon[:label].to_s, checked: editor.listed?(key, boon[:key].to_s),
+                            tooltip: "ASSESS says: #{Array(boon[:adjectives]).join(', ')}.",
+                            on: { change: Page.on(session, :toggle_boon, key, boon[:key].to_s) })
+                ui.text(slot: '1', key: 'what', emphasis: :subtle,
+                        content: "#{Array(boon[:adjectives]).join(', ')}. #{boon[:effect]}".strip)
+              end
+            end
+          end
+        end
+      end
+
+      # The saved hunts, one line each: its name opens it, the Default tick
+      # is the one a bare ;eohunter starts, and Delete is at the end of the
+      # line it belongs to.
+      def manage(ui, editor, session)
+        ui.group(key: 'saved', label: 'Saved hunts') do
+          if editor.profiles.empty?
+            ui.text(key: 'none', content: 'No hunts saved yet. Save the draft to start one.', emphasis: :subtle)
+          else
+            ui.collection(editor.profiles) { |name, _| Page.hunt_line(ui, editor, name, session) }
+          end
+        end
+        ui.group(key: 'bigshot', label: 'Bigshot profiles') do
+          if editor.legacy_profiles.empty?
+            ui.text(key: 'none', content: 'None found under bigshot_profiles.', emphasis: :subtle)
+          else
+            ui.text(key: 'hint', content: 'Opened as an unsaved copy; the original is never written.', emphasis: :subtle)
+            ui.table(key: 'list', selection: :single, activation: :single, max_height: 200,
+                     columns: [{ key: 'name', label: 'Profile', sortable: true }],
+                     rows: editor.legacy_profiles.map { |name| { key: Page.row_key('b', name), cells: { 'name' => name } } },
+                     on: { row_activate: Page.on(session, :import_row) })
+          end
+        end
+      end
+
+      # One saved hunt: its name opens it, Default makes it the hunt a bare
+      # ;eohunter starts, Delete asks, and the red X that then appears
+      # beside it is the answer. Clicking anything else withdraws the ask.
+      def hunt_line(ui, editor, name, session)
+        pending = editor.pending_delete
+        asked = pending && (pending[:name] || pending['name']) == name
+        dependents = asked ? Array(pending[:dependents] || pending['dependents']) : []
+        key = Page.row_key('h', name)
+        ui.columns(key: key, count: 4, weights: [1, 0, 0, 0], compact: true, row_align: :center) do
+          ui.button(slot: '0', key: 'open', label: name, tooltip: 'Open this hunt',
+                    on: { activate: Page.on(session, :open_named, name) })
+          ui.checkbox(slot: '1', key: 'default', label: 'Default', checked: name == editor.active_profile,
+                      tooltip: 'The hunt a bare ;eohunter starts. Ticking it never starts it.',
+                      on: { change: Page.on(session, :set_default, name) })
+          ui.button(slot: '2', key: 'delete', label: 'Delete',
+                    tooltip: 'Asks first: a red X appears beside this to confirm. A backup is kept.',
+                    on: { activate: Page.on(session, asked ? :cancel_delete : :request_delete, name) })
+          if asked
+            ui.button(slot: '3', key: 'confirm', label: 'X', variant: :danger,
+                      tooltip: "Delete #{name}. A backup is kept." +
+                               (dependents.empty? ? '' : " Also named by: #{dependents.join(', ')}."),
+                      on: { activate: Page.on(session, :confirm_delete) })
+          else
+            ui.text(slot: '3', key: 'spacer', content: '')
+          end
+        end
+      end
+
+      # What would be saved, and what validation said about it.
+      def review(ui, editor, session)
+        changes = editor.changes
+        ui.group(key: 'changes', label: changes.empty? ? 'No unsaved changes' : "Unsaved changes (#{changes.size})") do
+          if changes.empty?
+            ui.text(key: 'none', content: 'The draft matches what was last loaded.', emphasis: :subtle)
+          else
+            ui.table(key: 'list', max_height: 300,
+                     columns: [{ key: 'key', label: 'Setting' }, { key: 'before', label: 'Was' }, { key: 'after', label: 'Now' }],
+                     rows: changes.map do |change|
+                       { key: Page.row_key('c', change['key']),
+                         cells: { 'key'    => change['key'].to_s,
+                                  'before' => Form.change_text(change['before'], 'unset'),
+                                  'after'  => Form.change_text(change['after'], 'removed') } }
+                     end)
+          end
+        end
+        ui.group(key: 'validation', label: 'Validation') do
+          if editor.validation.nil?
+            ui.text(key: 'none', content: 'Not checked yet. Validate checks the draft against the installed engine.', emphasis: :subtle)
+          else
+            { 'Errors' => [editor.errors, :danger], 'Warnings' => [editor.warnings, :caution] }.each do |title, (entries, tone)|
+              next if entries.empty?
+
+              ui.text(key: title.downcase, content: "#{title} (#{entries.size})", emphasis: :strong, tone: tone)
+              entries.each_with_index do |entry, index|
+                ui.text(key: "#{title.downcase}-#{index}", content: Form.message(entry), tone: tone)
+              end
+            end
+            ui.text(key: 'clean', content: 'No problems found.', tone: :positive) if editor.errors.empty? && editor.warnings.empty?
+          end
+        end
+        ui.columns(key: 'finish', count: 2, weights: [0, 0]) do
+          ui.button(slot: '0', key: 'validate', label: 'Validate', on: { activate: Page.on(session, :validate) })
+          ui.button(slot: '1', key: 'save', label: 'Save', variant: :primary, on: { activate: Page.on(session, :save) })
+        end
+      end
+
+      # The level band the creatures are searched in.
+      # The three-state filters: a flag the templates record for every
+      # creature, or a trait recorded for only some.
+      YES_NO = [{ value: '', label: 'any' }, { value: 'yes', label: 'yes' }, { value: 'no', label: 'no' }].freeze
+
+      # The sparse traits offered as filters, with what each is called.
+      TRAIT_LABELS = { sleepable: 'Sleepable', witherable: 'Witherable', sympathy: 'Sympathy', muggable: 'Muggable',
+                       blood: 'Has blood', bones: 'Has bones', limbs: 'Has limbs' }.freeze
+
+      # The level band and the other things a creature is chosen on.
+      # @param label [String, nil] the heading, or nil for none when the
+      #   caller has already said what this is
+      def level_range(ui, editor, session, label: 'Find creatures')
+        query = editor.hunt_query
+        catalogue = editor.creature_catalogue
+        ui.group(key: 'range', **(label ? { label: label } : { presentation_role: :form })) do
+          # Two rows: the band and the name, then the four kinds. One row
+          # of seven ran off the page.
+          ui.columns(key: 'levels', count: 3, weights: [0, 0, 1], compact: true, row_align: :end) do
+            ui.number_input(slot: '0', key: 'low', label: 'Level from', value: query[:low] || 1, min: 1, max: 999, stepper_buttons: true,
+                            tooltip: "Lowest creature level to list. Opens at #{Creatures::LEVEL_BELOW} below your own level.",
+                            on: { change: Page.on(session, :hunt_filter, :low) })
+            ui.number_input(slot: '1', key: 'high', label: 'to', value: query[:high] || 999, min: 1, max: 999, stepper_buttons: true,
+                            tooltip: "Highest creature level to list. Opens at #{Creatures::LEVEL_ABOVE} above your own level.",
+                            on: { change: Page.on(session, :hunt_filter, :high) })
+            ui.text_input(slot: '2', key: 'name', label: 'Name', value: query[:name].to_s, search: true, placeholder: 'any creature',
+                          control_width_chars: 20, tooltip: 'Part of a creature name. This also finds creatures with no recorded level.',
+                          on: { change: Page.on(session, :hunt_filter, :name) })
+          end
+          ui.columns(key: 'kinds', count: 4, weights: [0, 0, 0, 0], compact: true, row_align: :end) do
+            ui.select(slot: '0', key: 'undead', label: 'Undead', options: YES_NO, value: Page.yes_no(query[:undead]),
+                      tooltip: 'Undead creatures only, living only, or either.',
+                      on: { change: Page.on(session, :hunt_filter, :undead) })
+            ui.select(slot: '1', key: 'types', label: 'Type', options: Page.name_options(Creatures.values_for(catalogue, :type), 'any'),
+                      value: Array(query[:types]).first.to_s, tooltip: 'Body type, as the creature templates record it.',
+                      on: { change: Page.on(session, :hunt_filter, :types) })
+            ui.select(slot: '2', key: 'classes', label: 'Class', options: Page.name_options(Creatures.classes_for(catalogue), 'any'),
+                      value: Array(query[:classes]).first.to_s,
+                      tooltip: 'A further classification such as non-corporeal undead. Few creatures carry one.',
+                      on: { change: Page.on(session, :hunt_filter, :classes) })
+            ui.select(slot: '3', key: 'families', label: 'Family', options: Page.name_options(Creatures.values_for(catalogue, :family), 'any'),
+                      value: Array(query[:families]).first.to_s, tooltip: 'The creature family: rolton, troll, wraith.',
+                      on: { change: Page.on(session, :hunt_filter, :families) })
+          end
+          ui.expander(key: 'more', label: 'More filters', on: { toggle: proc {} }) do
+            # Boss and the seven traits, four to a row.
+            filters = [[:boss, 'Boss', 'Boss creatures only, ordinary ones only, or either.']] +
+                      TRAIT_LABELS.map { |trait, label| [trait, label, nil] }
+            filters.each_slice(4).with_index do |row, row_index|
+              ui.columns(key: "traits-#{row_index}", count: 4, weights: [0, 0, 0, 0], compact: true, row_align: :end) do
+                row.each_with_index do |(field, label, tip), index|
+                  if tip.nil?
+                    tally = editor.trait_tally(field)
+                    tip = "Of the creatures listed: #{tally[:yes]} yes, #{tally[:no]} no, #{tally[:unknown]} not recorded. " \
+                          'A creature with nothing recorded is kept either way.'
+                  end
+                  value = field == :boss ? query[:boss] : query[:traits][field]
+                  ui.select(slot: index.to_s, key: field.to_s, label: label, options: YES_NO, value: Page.yes_no(value),
+                            tooltip: tip, on: { change: Page.on(session, :hunt_filter, field) })
+                end
+              end
+            end
+          end
+        end
+      end
+
+      # A three-state filter as the select shows it.
+      def yes_no(value)
+        case value
+        when true then 'yes'
+        when false then 'no'
+        else ''
+        end
+      end
+
+      # Every creature in the range, to pick one from.
+      def creature_picker(ui, editor, session)
+        matches = editor.creature_matches
+        ui.group(key: 'creatures', label: 'Creatures in range: pick one to see where it lives') do
+          ui.text(key: 'creature-error', content: editor.creature_error.to_s, tone: :danger) if editor.creature_error
+          if matches.empty?
+            ui.text(key: 'none', emphasis: :subtle,
+                    content: editor.creature_catalogue.empty? ? 'No creature data is installed.' : 'No creature in this range.')
+          else
+            ui.table(key: 'list', selection: :single, activation: :single, max_height: 260,
+                     tooltip: 'Click a creature to open the map where it lives.', selected: [],
+                     columns: [{ key: 'name', label: 'Creature', sortable: true },
+                               { key: 'level', label: 'Level', align: :end, sortable: true },
+                               { key: 'family', label: 'Family', sortable: true },
+                               { key: 'areas', label: 'Lives in' }],
+                     rows: matches.map do |creature|
+                       { key: Page.row_key('m', creature[:name]),
+                         cells: { 'name' => creature[:name].to_s, 'level' => creature[:level].to_s,
+                                  'family' => creature[:family].to_s, 'areas' => creature[:areas].join(', ') } }
+                     end,
+                     on: { row_activate: Page.on(session, :find_creature) })
+          end
+          hidden = editor.unlevelled_count
+          if hidden.positive? && editor.hunt_query[:name].to_s.strip.empty?
+            ui.text(key: 'unlevelled', emphasis: :subtle,
+                    content: "#{hidden} creature#{'s' if hidden != 1} with no recorded level #{hidden == 1 ? 'is' : 'are'} not listed; type a name to find one.")
+          end
+        end
+      end
+
+      # --- The map ------------------------------------------------------------
+      #
+      # The creature search on Where to hunt, behind a button like the map:
+      # the level band and filters, then the creatures in range. Picking one
+      # opens the map on the sheet its rooms are drawn on.
+      def creature_finder(ui, editor, session)
+        unless editor.creature_search_open?
+          ui.columns(key: 'show-finder-row', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'show-finder', label: 'Find a creature',
+                      tooltip: 'Search the creature data by level and other things, and open the map where a creature lives.',
+                      on: { activate: Page.on(session, :toggle_creature_search) })
+          end
+          return
+        end
+
+        ui.group(key: 'finder-section', label: 'Find a creature') do
+          Page.level_range(ui, editor, session, label: nil)
+          Page.creature_picker(ui, editor, session)
+          ui.columns(key: 'finder-buttons', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'hide-finder', label: 'Hide', on: { activate: Page.on(session, :toggle_creature_search) })
+          end
+        end
+      end
+
+      # The installed map sheet, drawn on a composite surface with one region
+      # per room. A left-click puts the room in the chosen role, a right-click
+      # takes it out of whatever role it holds. The hunt's rooms are washed
+      # green, the start room ringed in blue, the boundaries crossed in red,
+      # the rest rooms ringed in their own colours.
+
+      # How much sheet to keep around the hunt, so the mapmaker's labels
+      # beside the rooms stay in the picture.
+      MAP_PADDING = 40
+      MAP_CONTEXT_SHARE = 0.25
+      MAP_CONTEXT_MAX = 320
+
+      # How much of a room's box a mark spans.
+      MARK_INSET = 0.15
+
+      # What each role is drawn as: a symbol for the rooms worth finding, an
+      # outline for the many rooms of the hunt itself. Never a fill, which
+      # hid the room number and the sheet's own colouring.
+      MARK_SHAPES = { 'hunting' => 'outline', 'hunting_room_id' => 'ring', 'hunting_boundaries' => 'cross',
+                      'rallypoint_room_ids' => 'ring', 'field_rest_room_id' => 'box', 'resting_room_id' => 'box' }.freeze
+
+      # Where the map sheets are served from, set by the launcher once it has
+      # registered Lich's map directory, or nil when it could not. With no
+      # route the rooms still draw and click; only the artwork is missing.
+      def map_route = @map_route
+
+      # @param route [String, nil]
+      def map_route=(route)
+        @map_route = route
+      end
+
+      # Where the sheet files are on disk, for their sizes; nil when not here.
+      def map_dir = @map_dir
+
+      # @param dir [String, nil]
+      def map_dir=(dir)
+        @map_dir = dir
+      end
+
+      # The map, or the button that opens it.
+      def area_map(ui, editor, session)
+        unless editor.map_open?
+          ui.columns(key: 'show-map-row', count: 1, weights: [0], compact: true) do
+            ui.button(slot: '0', key: 'show-map', label: 'Show the map', on: { activate: Page.on(session, :toggle_map) })
+          end
+          return
+        end
+
+        current = editor.map
+        ui.group(key: 'map', label: 'Map') do
+          if current.nil?
+            ui.text(key: 'unavailable', tone: :caution, content: editor.map_error || 'The installed map is unavailable.')
+            ui.button(key: 'hide-map', label: 'Hide the map', on: { activate: Page.on(session, :toggle_map) })
+            next
+          end
+          Array(current[:diagnostics]).each_with_index do |note, index|
+            ui.text(key: "d#{index}", tone: :caution, content: note.to_s)
+          end
+          editor.keep_sheet(Page.current_sheet(editor, current))
+          Page.map_finder(ui, editor, session)
+          Page.map_controls(ui, editor, current, session)
+          ui.text(key: 'legend', emphasis: :subtle,
+                  content: 'Left-click a room to give it the chosen role; right-click clears it. ' \
+                           'Green outline: the hunt. Blue ring: start. Red cross: boundary. Orange ring: rally. ' \
+                           'Purple box: field rest. Pink box: town rest. ' \
+                           'Drag to pan; Ctrl and the wheel zooms. The view stays put while you click.')
+          ui.scroll(key: 'view', max_height: editor.map_view_height) do
+            Page.map_surface(ui, editor, current, session)
+          end
+          Page.map_status(ui, editor, current)
+          Page.footprint_controls(ui, editor, current, session)
+        end
+      end
+
+      # Find where to look: a box that fills in place names as they are
+      # typed, and takes part of a room title, a room id or a UID as well.
+      # When the finds are spread over sheets, a second box offers them.
+      def map_finder(ui, editor, session)
+        places = editor.area_names.map { |entry| entry[:name].to_s }.reject(&:empty?).first(BOUNDS_OPTIONS - 1)
+        options = [{ value: '', label: '' }] + places.map { |name| { value: name, label: name } }
+        matches = editor.room_matches
+        ui.columns(key: 'finder', count: 2, weights: [0, 1], compact: true, row_align: :end) do
+          ui.select(slot: '0', key: 'find', label: 'Find', editable: true, options: options, control_width_chars: 34,
+                    value: editor.room_query,
+                    placeholder: 'a place, part of a room title, a room id or uNNNN',
+                    tooltip: 'Place names fill in as you type. Anything else is looked for in room titles. ' \
+                             'The sheet it is on comes up with that room in view.',
+                    on: { change: Page.on(session, :find_room) })
+          choices = editor.sheet_choices
+          if matches.empty? && choices.size > 1
+            # A found creature living on several sheets: which to show.
+            ui.select(slot: '1', key: 'found-sheets', label: "#{choices.size} sheets",
+                      options: [{ value: '', label: 'pick one' }] + choices.map { |sheet| { value: sheet[:id].to_s, label: sheet[:name].to_s } },
+                      value: '', tooltip: "The sheets #{editor.room_query} lives on. Pick one to show it.",
+                      on: { change: Page.on(session, :sheet) })
+          elsif matches.empty?
+            ui.text(slot: '1', key: 'none', content: '')
+          else
+            ui.select(slot: '1', key: 'found', label: "#{matches.size} rooms found",
+                      options: [{ value: '', label: 'pick one' }] + matches.map do |room|
+                        { value: room[:id].to_s, label: "#{room[:title]} (#{room[:id]}) - #{room[:sheet_label] || room[:image]}" }
+                      end,
+                      value: '', tooltip: 'Which of the finds to show',
+                      on: { change: Page.on(session, :go_to_room) })
+          end
+        end
+      end
+
+      # How many options a select may hold, by the contract.
+      BOUNDS_OPTIONS = 512
+
+      # The sheet, the role a click assigns, and the zoom.
+      def map_controls(ui, editor, current, session)
+        ui.columns(key: 'controls', count: 6, weights: [0, 0, 0, 0, 0, 0], compact: true, row_align: :end) do
+          # The sheets the hunt touches first, with their room counts, then
+          # every other installed sheet: an empty hunt starts by picking one.
+          counts = Page.sheet_counts(current)
+          labels = current[:sheet_labels] || {}
+          options = counts.sort_by { |name, count| [-count, name] }.map do |name, count|
+            { value: name, label: "#{labels[name] || name} (#{count} rooms)" }
+          end
+          shown = Page.current_sheet(editor, current).to_s
+          others = (Array(current[:sheets]) + [shown]).uniq.reject { |name| name.empty? || counts.key?(name) }
+          others = others.sort_by { |name| (labels[name] || name).downcase }
+          options.concat(others.map { |name| { value: name, label: labels[name] || name } })
+          options.unshift(value: '', label: 'Pick a sheet') if counts.empty?
+          options = [{ value: '', label: '(no sheets installed)' }] if options.empty?
+          # A new select whenever the sheet changes, as the boxes the map
+          # writes are new boxes: the browser then has no earlier choice of
+          # its own to show over the sheet the finder just switched to.
+          ui.select(slot: '0', key: "sheet-#{Digest::SHA256.hexdigest(shown)[0, 8]}", label: 'Sheet', options: options, control_width_chars: 24,
+                    value: shown,
+                    tooltip: 'Which map to mark rooms on. Sheets the hunt is already drawn on come first.',
+                    on: { change: Page.on(session, :sheet) })
+          roles = Editor::ROLE_LABELS.reject { |role, _| role == 'hunting' }.map { |role, label| { value: role, label: label } }
+          ui.select(slot: '1', key: 'role', label: 'Left-click sets', options: roles, value: editor.assign_role,
+                    tooltip: 'What a left-click on a room makes it. A right-click clears a room whatever it is.',
+                    on: { change: Page.on(session, :assign_role) })
+          ui.button(slot: '2', key: 'zoom-out', label: '-', tooltip: 'Zoom out', on: { activate: Page.on(session, :map_zoom, 'out') })
+          ui.button(slot: '3', key: 'zoom-reset', label: "#{(editor.map_scale * 100).round}%", tooltip: 'Back to the sheet fitting the width',
+                    on: { activate: Page.on(session, :map_reset_zoom) })
+          ui.button(slot: '4', key: 'zoom-in', label: '+', tooltip: 'Zoom in', on: { activate: Page.on(session, :map_zoom, 'in') })
+          ui.button(slot: '5', key: 'hide-map', label: 'Hide', tooltip: 'Put the map away', on: { activate: Page.on(session, :toggle_map) })
+        end
+      end
+
+      # How many of the map's rooms are drawn on each sheet.
+      def sheet_counts(current)
+        counts = Hash.new(0)
+        Array(current[:rooms]).each do |room|
+          next unless room[:image_coords]
+
+          name = room[:image].to_s
+          counts[name] += 1 unless name.empty?
+        end
+        counts
+      end
+
+      # The sheet being looked at: the chosen one, else the one most of the
+      # hunt's rooms are drawn on.
+      def current_sheet(editor, current)
+        return editor.sheet if editor.sheet && !editor.sheet.to_s.empty?
+
+        Page.sheet_counts(current).max_by { |name, count| [count, name] }&.first
+      end
+
+      # The sheet image with one region per room on it, cropped to the hunt.
+      def map_surface(ui, editor, current, session)
+        sheet = Page.current_sheet(editor, current)
+        rooms = Array(current[:rooms]).select { |room| room[:image].to_s == sheet.to_s && room[:image_coords] }
+        if rooms.empty?
+          ui.text(key: 'no-rooms', emphasis: :subtle, content: 'No rooms on this sheet carry map coordinates.')
+          return
+        end
+
+        route = Page.map_route
+        layers = []
+        layers << { 'kind' => 'image', 'x' => 0, 'y' => 0, 'src' => "#{route}#{sheet}" } if route
+        ui.text(key: 'no-art', tone: :caution, content: 'The map artwork is not being served; the rooms still work.') unless route
+        rooms.each do |room|
+          role = editor.role_for(room[:id])
+          layers.concat(Page.room_marks(role, room[:image_coords])) if role
+          x1, y1, x2, y2 = room[:image_coords].map(&:to_i)
+          layers << { 'kind' => 'region', 'key' => "room-#{room[:id]}",
+                      'x1' => x1, 'y1' => y1, 'x2' => x2, 'y2' => y2,
+                      'label' => Page.room_label(room, role), 'activates' => true }
+        end
+        # The whole sheet, every time: the marks are what is being edited,
+        # so the view is never cut to them. The sheet's own size when its
+        # file can be read, else the box its rooms occupy. Only the first
+        # draw of a sheet scrolls to the start room; after that the view
+        # stays where the viewer put it.
+        marked = rooms.select { |room| editor.role_for(room[:id]) }
+        fresh = editor.map_frame.nil?
+        frame = editor.map_frame ||= Page.sheet_frame(sheet, rooms)
+        editor.map_origin = { x: frame[:x], y: frame[:y] }
+        anchor = fresh ? (editor.take_map_anchor || Page.map_anchor(marked.empty? ? rooms : marked, editor)) : nil
+        ui.composite(key: 'surface', width: frame[:width], height: frame[:height],
+                     scale: Page.map_scale(frame, editor), surface_events: true,
+                     layers: Page.shift_layers(layers, frame),
+                     **(anchor ? { scroll_to: "room-#{anchor}" } : {}),
+                     on: { region_activate: Page.on(session, :map_room),
+                           surface_activate: Page.on(session, :map_click),
+                           zoom: Page.on(session, :map_wheel) })
+      end
+
+      # What the map shows, in a line.
+      def map_status(ui, editor, current)
+        hunting = Array(current[:hunting_room_ids]).size
+        bounds = Array(current.dig(:markers, 'hunting_boundaries')).size
+        start = editor.settings['hunting_room_id'].to_s
+        parts = []
+        parts << (start.empty? ? 'No start room yet.' : "Start room #{start}.")
+        parts << "#{hunting} hunting room#{'s' if hunting != 1}, #{bounds} boundar#{bounds == 1 ? 'y' : 'ies'}."
+        parts << 'The hunt was cut short at the walker\'s limit.' if current[:truncated]
+        ui.text(key: 'map-status', content: parts.join(' '), emphasis: :subtle)
+      end
+
+      # Recompute the boundaries from the rooms the hunt covers now.
+      def footprint_controls(ui, editor, current, session)
+        rooms = Array(current[:hunting_room_ids])
+        start = editor.settings['hunting_room_id'].to_s
+        return if rooms.empty? || start.empty?
+
+        ui.button(key: 'refit', label: "Recompute boundaries for these #{rooms.size} rooms",
+                  tooltip: 'Refuses rather than widening the area if these rooms cannot form one reachable hunt from the start.',
+                  on: { activate: Page.on(session, :room_geometry, rooms, start.to_i) })
+      end
+
+      # The layers that show a room's role: a wash for the hunt's rooms, a
+      # mark for the rooms worth finding.
+      def room_marks(role, box)
+        x1, y1, x2, y2 = box.map(&:to_i)
+        left = [x1, x2].min
+        top = [y1, y2].min
+        width = (x2 - x1).abs
+        height = (y2 - y1).abs
+        colour = Editor::ROLE_COLOURS.fetch(role)
+        shape = MARK_SHAPES.fetch(role)
+        case shape
+        when 'outline'
+          # A thin outline, not a wash: the room keeps its number and its
+          # own colour, which the sheets use to say what kind of room it is.
+          [{ 'kind' => 'rectangle', 'mode' => 'stroke', 'x' => left, 'y' => top, 'w' => width, 'h' => height,
+             'color' => colour, 'line_width' => 3 }]
+        when 'box'
+          [{ 'kind' => 'rectangle', 'mode' => 'stroke', 'x' => left, 'y' => top, 'w' => width, 'h' => height,
+             'color' => colour, 'line_width' => 4 }]
+        else
+          inset_x = [(width * MARK_INSET).round, 1].max
+          inset_y = [(height * MARK_INSET).round, 1].max
+          [{ 'kind' => 'marker', 'shape' => shape, 'x' => left + inset_x, 'y' => top + inset_y,
+             'w' => [width - (2 * inset_x), 2].max, 'h' => [height - (2 * inset_y), 2].max,
+             'line_width' => 3, 'color' => colour }]
+        end
+      end
+
+      # The whole sheet: its image's own size, read from the file's header
+      # when the sheets are on disk here, else the box its rooms occupy.
+      def sheet_frame(sheet, rooms)
+        size = Page.sheet_size(sheet)
+        return { x: 0, y: 0, width: size[0], height: size[1] } if size
+
+        box = Page.map_frame(rooms)
+        { x: 0, y: 0, width: box[:x] + box[:width], height: box[:y] + box[:height] }
+      end
+
+      # The first bytes of a PNG and of a JPEG, built rather than written so
+      # the source stays ASCII.
+      PNG_SIGNATURE = [0x89].pack('C') + 'PNG'.b
+      JPEG_SIGNATURE = [0xFF, 0xD8].pack('C2')
+
+      # A sheet image's pixel size from its header: PNG, GIF or JPEG.
+      # @return [Array(Integer, Integer), nil] width and height, or nil when
+      #   the file is not there or not one of those
+      def sheet_size(sheet)
+        return nil if Page.map_dir.to_s.empty? || sheet.to_s.empty?
+
+        path = File.join(Page.map_dir, sheet.to_s)
+        return nil unless File.file?(path)
+
+        File.open(path, 'rb') do |file|
+          head = file.read(26).to_s
+          if head.start_with?(PNG_SIGNATURE)
+            return head[16, 8].unpack('N2')
+          elsif head.start_with?('GIF'.b)
+            return head[6, 4].unpack('v2')
+          elsif head.start_with?(JPEG_SIGNATURE)
+            return Page.jpeg_size(file)
+          end
+        end
+        nil
+      rescue SystemCallError
+        nil
+      end
+
+      # Walk a JPEG's segments to the first frame header, which carries
+      # the size.
+      def jpeg_size(file)
+        file.seek(2)
+        while (marker = file.read(2)) && marker.bytesize == 2
+          return nil unless marker.getbyte(0) == 0xFF
+
+          kind = marker.getbyte(1)
+          next if kind == 0xFF
+          length = file.read(2).to_s.unpack1('n')
+          return nil if length.nil? || length < 2
+
+          if (0xC0..0xCF).cover?(kind) && ![0xC4, 0xC8, 0xCC].include?(kind)
+            body = file.read(5).to_s
+            return nil if body.bytesize < 5
+
+            height, width = body[1, 4].unpack('n2')
+            return [width, height]
+          end
+          file.seek(length - 2, IO::SEEK_CUR)
+        end
+        nil
+      end
+
+      # The box the rooms occupy, padded and squared off so the fit fills
+      # the view both ways.
+      def map_frame(rooms)
+        boxes = rooms.filter_map { |room| room[:image_coords] }
+        return { x: 0, y: 0, width: 1200, height: 900 } if boxes.empty?
+
+        x1 = boxes.map { |box| [box[0].to_i, box[2].to_i].min }.min
+        y1 = boxes.map { |box| [box[1].to_i, box[3].to_i].min }.min
+        x2 = boxes.map { |box| [box[0].to_i, box[2].to_i].max }.max
+        y2 = boxes.map { |box| [box[1].to_i, box[3].to_i].max }.max
+        pad = [[(x2 - x1), (y2 - y1)].max * MAP_CONTEXT_SHARE, MAP_PADDING].max
+        pad = [pad, MAP_CONTEXT_MAX].min.round
+        left = [x1 - pad, 0].max
+        top = [y1 - pad, 0].max
+        width = [(x2 + pad) - left, 120].max
+        height = [(y2 + pad) - top, 120].max
+        side = [width, height].max
+        left = [left - ((side - width) / 2), 0].max
+        top = [top - ((side - height) / 2), 0].max
+        { x: left, y: top, width: side, height: side }
+      end
+
+      # Move every layer so the frame's top-left is the surface's origin.
+      # The sheet image moves with them, which is what crops it.
+      def shift_layers(layers, frame)
+        dx = frame[:x]
+        dy = frame[:y]
+        return layers if dx.zero? && dy.zero?
+
+        layers.map do |layer|
+          moved = layer.dup
+          %w[x x1 x2].each { |key| moved[key] = layer[key] - dx if layer.key?(key) }
+          %w[y y1 y2].each { |key| moved[key] = layer[key] - dy if layer.key?(key) }
+          moved
+        end
+      end
+
+      # How far to scale the surface so the sheet fills the view's width,
+      # times the viewer's own zoom. Rounded down: a surface a fraction wider
+      # than its view is a clipped edge.
+      def map_scale(frame, editor)
+        width = frame[:width].to_f
+        fit = width.positive? ? editor.map_fit_width / width : 1.0
+        (((fit * editor.map_scale) * 1000).floor / 1000.0).clamp(0.1, 8.0)
+      end
+
+      # The room the view opens looking at: the start room, else the marked
+      # room nearest the middle of them all.
+      def map_anchor(rooms, editor)
+        ids = rooms.map { |room| room[:id] }
+        start = ids.find { |id| editor.role_for(id) == 'hunting_room_id' }
+        return start if start
+
+        boxes = rooms.filter_map { |room| room[:image_coords] && [room[:id], room[:image_coords]] }
+        return ids.first if boxes.empty?
+
+        cx = boxes.sum { |(_id, box)| (box[0].to_i + box[2].to_i) / 2.0 } / boxes.size
+        cy = boxes.sum { |(_id, box)| (box[1].to_i + box[3].to_i) / 2.0 } / boxes.size
+        boxes.min_by do |(_id, box)|
+          (((box[0].to_i + box[2].to_i) / 2.0) - cx)**2 + (((box[1].to_i + box[3].to_i) / 2.0) - cy)**2
+        end&.first
+      end
+
+      def room_label(room, role)
+        base = "#{room[:title]} (#{room[:id]})"
+        role ? "#{base}: #{Editor::ROLE_LABELS.fetch(role, role)}" : base
+      end
+
+      # --- Helpers the editor and the session share ---------------------------
+
+      # A component key for a named row, safe for the contract and stable
+      # across renders. Unsafe characters become '_', and a short digest keeps
+      # two names that differ only in those characters apart.
+      # @param prefix [String] which list the row is in
+      # @param name [String] the row's name
+      # @return [String]
+      def row_key(prefix, name)
+        text = name.to_s
+        safe = text.gsub(/[^A-Za-z0-9_.:-]/, '_')
+        digest = Digest::SHA256.hexdigest(text)[0, 8]
+        "#{prefix}-#{safe}-#{digest}"[0, 128]
+      end
+
+      # The name a row key was made from, out of the names offered.
+      # @param prefix [String] the list's prefix
+      # @param key [String] the activated row's key
+      # @param names [Array<String>] what the list holds
+      # @return [String, nil]
+      def row_name(prefix, key, names)
+        names.find { |name| Page.row_key(prefix, name) == key.to_s }
+      end
+
+      # What a list setting can be filled with: the chosen area's creatures,
+      # for the settings that take creature names.
+      # @param editor [Editor] the editing session
+      # @param field [Hash] a schema field descriptor
+      # @return [Array<String>]
+      def list_suggestions(editor, field)
+        return [] unless CREATURE_LISTS.include?(field['key'])
+
+        editor.respond_to?(:area_creatures) ? editor.area_creatures.map { |creature| creature[:name].to_s } : []
+      end
+
+      # A select's options from a list of names, with an unset entry first.
+      def name_options(names, unset_label)
+        [{ value: '', label: unset_label }] + names.map(&:to_s).reject(&:empty?).uniq.map { |name| { value: name, label: name } }
+      end
+
+      # The hand and ammunition pickers' options. The contract refuses a
+      # select whose options repeat a value, so they are deduplicated, and
+      # the group each came from is shown in its label.
+      def equipment_options(records)
+        seen = {}
+        options = [{ value: '', label: '(unset)' }]
+        Array(records).each do |record|
+          value = (record['value'] || record[:value]).to_s
+          next if value.empty? || value == OTHER || seen[value]
+
+          seen[value] = true
+          label = (record['label'] || record[:label] || value).to_s
+          group = (record['group'] || record[:group]).to_s
+          options << { value: value, label: group.empty? ? label : "#{label}  [#{group}]" }
+        end
+        options
+      end
+
+      # How tall a text box is for its text: two lines when empty, growing
+      # with what is in it.
+      def rows_for(text)
+        (text.to_s.lines.size + 1).clamp(2, 14)
+      end
+
+      # Run a Ruby condition where the hunt would and say what it said, in a
+      # line. Parsed first, as Validate does: Ruby's own SyntaxError is a
+      # multi-line source excerpt that will not fit on one.
+      #
+      # Off the caller's thread with a time limit: the condition is arbitrary
+      # code, and one that waits on the game must not freeze the window.
+      # @param code [String] the condition
+      # @param evaluate [#call] runs the code where the hunt would
+      # @return [String]
+      def test_condition(code, evaluate)
+        return 'Nothing to test.' if code.to_s.strip.empty?
+
+        require 'prism'
+        broken = Prism.parse(code).errors.first
+        return "Not valid Ruby: #{broken.message}" if broken
+
+        outcome = nil
+        worker = Thread.new do
+          value = evaluate.call(code)
+          outcome = "#{value ? 'true' : 'false'} right now (#{value.inspect[0, 80]})"
+        rescue Exception => error # rubocop:disable Lint/RescueException -- a SyntaxError or a script exit must be shown, not kill the page
+          outcome = "Raised #{error.class}: #{error.message[0, 200]}"
+        end
+        return outcome if worker.join(TEST_LIMIT)
+
+        worker.kill
+        "Did not finish within #{TEST_LIMIT} seconds; stopped."
+      end
+    end
+  end
+end

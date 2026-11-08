@@ -93,10 +93,24 @@ module EO
           raise ArgumentError, 'native map data is unavailable' unless @geography
 
           @geography.room_geometry(room_ids: request.fetch('room_ids'), start_room_id: request.fetch('start_room_id'))
+        when 'room_search'
+          raise ArgumentError, 'native map data is unavailable' unless @geography
+
+          @geography.room_search(query: request.fetch('query'))
+        when 'area_names'
+          @geography ? @geography.area_names : []
+        when 'creatures_here'
+          raise ArgumentError, 'native creature data is unavailable' unless @geography
+
+          @geography.creatures_in_rooms(request.fetch('room_ids'))
         when 'creatures'
           raise ArgumentError, 'native creature data is unavailable' unless @geography
 
           @geography.creature_catalogue
+        when 'creature_sheets'
+          raise ArgumentError, 'native creature data is unavailable' unless @geography
+
+          @geography.creature_sheets(request.fetch('name'))
         when 'area'
           raise ArgumentError, 'native creature/map data is unavailable' unless @geography
 

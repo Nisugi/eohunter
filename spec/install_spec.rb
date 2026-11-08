@@ -32,7 +32,7 @@ RSpec.describe EOHunter::Install do
     File.write(File.join(root, 'eohunter.lic'), "=begin\n      required: Lich >= 5.22.0\n=end\n")
     File.write(File.join(root, 'libeocoordination.lic'), "# lib\n")
     File.write(File.join(root, 'eocoordination', 'protocol.rb'), "# protocol\n")
-    File.write(File.join(root, 'eohunter', 'setup', 'window.rb'), "# window\n")
+    File.write(File.join(root, 'eohunter', 'setup', 'page.rb'), "# window\n")
     File.write(File.join(root, 'libeo.lic'), "# not shipped\n")
     parts.each { |part| File.write(File.join(root, 'eohunter', part), "# #{part}\n") }
     File.write(File.join(root, 'eohunter', 'engine.rb'), "    VERSION = '#{version}'\n")
@@ -43,7 +43,7 @@ RSpec.describe EOHunter::Install do
     it 'is the script, the engine and setup parts, and the coordination library' do
       files = described_class.payload_files
       expect(files).to include('eohunter.lic', 'libeocoordination.lic', 'eohunter/engine.rb',
-                               'eohunter/setup/window.rb', 'eocoordination/protocol.rb')
+                               'eohunter/setup/page.rb', 'eocoordination/protocol.rb')
       expect(files).not_to include('libeo.lic')
       expect(files.grep(/\A(?:eohunter|eocoordination)\/|\A(?:eohunter|libeocoordination)\.lic\z/)).to eq(files)
     end
@@ -89,7 +89,7 @@ RSpec.describe EOHunter::Install do
       result = described_class.install(dir, root: payload)
       expect(result[:version]).to eq('1.0.0')
       expect(File.read(File.join(dir, 'scripts', 'eohunter', 'watch.rb'))).to eq("# watch.rb\n")
-      expect(File).to exist(File.join(dir, 'scripts', 'eohunter', 'setup', 'window.rb'))
+      expect(File).to exist(File.join(dir, 'scripts', 'eohunter', 'setup', 'page.rb'))
       expect(File).not_to exist(File.join(dir, 'scripts', 'libeo.lic'))
       expect(described_class.manifest(dir)['files'].keys).to match_array(result[:copied])
       expect(File.read(File.join(dir, 'data', 'keep.yaml'))).to eq('mine')
@@ -117,7 +117,7 @@ RSpec.describe EOHunter::Install do
       described_class.install(dir, root: payload)
       File.write(File.join(dir, 'scripts', 'other.lic'), 'not ours')
       removed = described_class.uninstall(dir)
-      expect(removed).to include('eohunter.lic', 'eohunter/setup/window.rb')
+      expect(removed).to include('eohunter.lic', 'eohunter/setup/page.rb')
       expect(Dir.children(File.join(dir, 'scripts'))).to eq(['other.lic'])
     end
 

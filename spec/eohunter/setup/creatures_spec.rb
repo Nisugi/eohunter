@@ -30,7 +30,7 @@ RSpec.describe EO::HunterSetup::Creatures do
 
   describe 'the level range it opens with' do
     it 'looks a little below and further above the character' do
-      expect(described_class.default_range(100)).to eq(low: 95, high: 110)
+      expect(described_class.default_range(100)).to eq(low: 90, high: 115)
     end
 
     it 'never asks for a level below one' do
@@ -134,11 +134,12 @@ RSpec.describe EO::HunterSetup::Creatures do
       expect(found.map { |entry| entry[:name] }).to eq(['forest troll', 'gigas skald'])
     end
 
-    # 5% of the installed templates have no level, and hiding them for a
-    # missing field is the same mistake as treating an unknown trait as a no.
-    it 'keeps a creature with no level recorded' do
+    # 5% of the installed templates have no level. A level band cannot
+    # place them, so it leaves them out; a search by name still finds them.
+    it 'leaves a creature with no level out of a band, and finds it by name' do
       unlevelled = described_class.catalogue([template('mystery', nil, 'Unknown', 'Biped')])
-      expect(described_class.search(unlevelled, low: 90, high: 100).size).to eq(1)
+      expect(described_class.search(unlevelled, low: 90, high: 100)).to be_empty
+      expect(described_class.search(unlevelled, low: 90, high: 100, name: 'myst').size).to eq(1)
     end
   end
 
@@ -149,6 +150,13 @@ RSpec.describe EO::HunterSetup::Creatures do
 
     it 'reads the other-classes the same way' do
       expect(described_class.classes_for(entries)).to eq(['Corporeal undead', 'Extraplanar', 'Magical'])
+    end
+
+    it 'spells a class one way however the templates wrote it' do
+      spelt = described_class.catalogue([template('a', 1, 'X', 'Biped', otherclass: ['Non-corporeal undead']),
+                                         template('b', 1, 'X', 'Biped', otherclass: ['Non Corporeal undead', 'non-corporeal  undead'])])
+      expect(described_class.classes_for(spelt)).to eq(['Non corporeal undead'])
+      expect(described_class.search(spelt, classes: ['Non corporeal undead']).size).to eq(2)
     end
 
     # An empty result has two quite different causes, and a player cannot act

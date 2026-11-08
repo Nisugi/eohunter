@@ -117,7 +117,7 @@ RSpec.describe EO::HunterSetup::Geography do
 
     it 'reads custom geometry without a creature selection and preserves UID boundary references' do
       result = geography.profile_map(settings: { 'hunting_room_id' => 'u101', 'hunting_boundaries' => 'u103, 8', 'resting_room_id' => 20, 'field_rest_room_id' => 4 })
-      expect(result[:markers]).to eq('hunting_room_id' => 1, 'hunting_boundaries' => [3, 8], 'resting_room_id' => 20, 'field_rest_room_id' => 4)
+      expect(result[:markers]).to eq('hunting_room_id' => 1, 'hunting_boundaries' => [3, 8], 'rallypoint_room_ids' => [], 'resting_room_id' => 20, 'field_rest_room_id' => 4)
       expect(result[:hunting_room_ids]).to eq([1, 2])
       expect(result[:boundary_refs]).to eq([{ ref: 'u103', id: 3 }, { ref: '8', id: 8 }])
       expect(result[:rooms].map { |room| room[:id] }).to eq([1, 2, 3, 4, 8, 20])
@@ -386,7 +386,7 @@ RSpec.describe EO::HunterSetup::Geography do
 
   it 'reports known co-spawns from overlapping other habitats, preserving unknown attributes' do
     result = geography.resolve(area: 'Forest')
-    expect(result[:creatures]).to include(name: 'wolf', level: 8, undead: nil)
+    expect(result[:creatures]).to include(a_hash_including(name: 'wolf', level: 8, undead: nil, boss_type: nil))
     expect(result[:verification]).to eq('Data-derived; not field-checked')
     expect(result).to include(data_revision: 'creatures-a', map_revision: 'map-a')
     expect(JSON.parse(JSON.generate(result))['room_ids']).to eq([1, 2, 3])

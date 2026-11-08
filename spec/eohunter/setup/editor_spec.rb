@@ -44,6 +44,24 @@ RSpec.describe EO::HunterSetup::Editor do
     expect(editor.settings).not_to have_key('hunting_stance')
   end
 
+  it 'saves a loaded hunt under a new name as a new hunt, leaving the original alone' do
+    editor.on_rename('forest')
+    editor.on_change('hunting_stance', 'offensive')
+    editor.on_save
+    editor.on_rename('plains')
+    editor.on_change('hunting_stance', 'defensive')
+    expect(editor.on_save).to be(true)
+    expect(editor.status_error).to be(false)
+    expect(editor.profiles).to contain_exactly('forest', 'plains')
+    editor.on_load('forest')
+    expect(editor.settings['hunting_stance']).to eq('offensive')
+    # A name that is already a hunt is refused, not written over.
+    editor.on_rename('plains')
+    editor.on_save
+    expect(editor.status_error).to be(true)
+    expect(editor.status).to include('already exists')
+  end
+
   it 'saves, keeps the returned revision, and saves again without a conflict' do
     editor.on_rename('forest')
     editor.on_change('hunting_stance', 'offensive')
@@ -217,116 +235,6 @@ RSpec.describe EO::HunterSetup::Editor do
     it 'reads an existing comma setting as entries' do
       editor.on_change('hunting_scripts', 'a, b , c')
       expect(editor.list_entries('hunting_scripts')).to eq(%w[a b c])
-    end
-  end
-
-  describe 'the guided path' do
-    it 'starts in the full editor and enters the wizard at step one' do
-      expect(editor).not_to be_guided
-      editor.on_toggle_guided
-      expect(editor).to be_guided
-      expect(editor.step).to eq(described_class::STEP_IDS.first)
-      expect(editor.step_number).to eq(1)
-    end
-
-    it 'walks forward and back, and stops at both ends' do
-      editor.on_toggle_guided
-      expect(editor.on_step_by(-1)).to be(false)
-      (described_class::STEP_IDS.size - 1).times { editor.on_step_by(1) }
-      expect(editor.step).to eq(described_class::STEP_IDS.last)
-      expect(editor.on_step_by(1)).to be(false)
-    end
-
-    it 'jumps to a named step and refuses one it does not have' do
-      editor.on_toggle_guided
-      expect(editor.on_step('rest')).to be(true)
-      expect(editor.step).to eq('rest')
-      expect(editor.on_step('nonsense')).to be(false)
-      expect(editor.step).to eq('rest')
-    end
-
-    it 'edits the same draft as the full editor, not a separate document' do
-      editor.on_change('hunting_stance', 'offensive')
-      editor.on_toggle_guided
-      expect(editor.settings).to include('hunting_stance' => 'offensive')
-      editor.on_change('flee_count', '3')
-      editor.on_toggle_guided
-      expect(editor).not_to be_guided
-      expect(editor.settings).to include('flee_count' => '3')
-    end
-
-    it 'asks about only a handful of settings per step' do
-      # The point of the wizard: 23 curated fields across five steps, against
-      # 119 in the tabs.
-      described_class::STEPS.each do |step|
-        step[:groups].each do |_title, keys|
-          expect(keys.size).to be <= 4
-          expect(editor.fields.map { |field| field['key'] } & keys).to match_array(keys)
-        end
-      end
-    end
-  end
-
-  describe 'injury policy' do
-    it 'sets and clears a hunt-specific override without touching the character default' do
-      editor.on_set_hunt_injury_policy('Careful')
-      expect(editor.draft['injury_policy']).to eq('Careful')
-      editor.on_set_hunt_injury_policy('')
-      expect(editor.draft).not_to have_key('injury_policy')
-    end
-  end
-
-  describe 'area resolution' do
-    it 'reports rather than raises when there is no creature or map data' do
-      expect(editor.areas).to eq([])
-      editor.on_resolve_area('Nowhere')
-      expect(editor.status_error).to be(true)
-      expect(editor.area).to be_nil
-    end
-
-    it 'refuses to apply an area that was never resolved' do
-      editor.on_apply_area
-      expect(editor.status_error).to be(true)
-      expect(editor.settings).not_to have_key('hunting_room_id')
-    end
-  end
-
-  describe 'combat routines' do
-    it 'reads creature names and slots out of the native target syntax' do
-      editor.on_change('targets', 'kobold, orc(b), giant rat')
-      expect(editor.target_names).to eq(['kobold', 'orc', 'giant rat'])
-      expect(editor.routine_slot('orc')).to eq('b')
-      expect(editor.routine_slot('kobold')).to be_nil
-    end
-
-    it 'gives a creature its own sequence without disturbing the main routine' do
-      editor.on_change('targets', 'kobold, orc')
-      editor.on_change('hunting_commands', 'attack')
-      editor.on_creature_sequence('orc', 'jab;punch')
-      expect(editor.status_error).to be(false)
-      expect(editor.routine_slot('orc')).to eq('b')
-      expect(editor.routine_text('b')).to eq('jab;punch')
-      expect(editor.routine_text(nil)).to eq('attack')
-      expect(editor.target_names).to include('kobold', 'orc')
-    end
-
-    it 'refuses an empty sequence rather than claiming a slot for nothing' do
-      editor.on_change('targets', 'kobold')
-      editor.on_creature_sequence('kobold', '   ')
-      expect(editor.status_error).to be(true)
-      expect(editor.routine_slot('kobold')).to be_nil
-    end
-
-    it 'links and unlinks a reusable Combat Plan' do
-      editor.on_set_combat_plan('Standard')
-      expect(editor.draft['combat_plan']).to eq('Standard')
-      editor.on_set_combat_plan('')
-      expect(editor.draft).not_to have_key('combat_plan')
-    end
-
-    it 'publishes the maneuver words the installed engine knows' do
-      expect(editor.routine_maneuvers).not_to be_empty
-      expect(editor.routine_maneuvers.first).to include(:word, :category)
     end
   end
 

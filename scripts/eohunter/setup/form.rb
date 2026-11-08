@@ -33,6 +33,10 @@ module EO
         return :entry if %w[integer number].include?(field['type'])
         return :ruby if Schema::RUBY_FIELDS.include?(key)
         return :list if list_field?(field)
+        # A creature list stays a one-line box however long it gets: a box
+        # that turned into a text block at the third name changed type under
+        # the viewer, and the browser lost track of it.
+        return :entry if Schema::CREATURE_LIST_KEYS.include?(key)
         return :text_block if structured?(field, editor.settings[key])
 
         :entry
@@ -122,8 +126,13 @@ module EO
       # @param field [Hash] a schema field descriptor
       # @return [String]
       def label(field)
-        units = field['units'].to_s
-        units.empty? ? field['label'].to_s : "#{field['label']} (#{units})"
+        field['label'].to_s
+      end
+
+      # What a number is counted in, for the box's placeholder and tooltip.
+      # @return [String] units, or ''
+      def units(field)
+        field['units'].to_s.strip
       end
 
       # What hovering a setting says: what it does, then where its value
@@ -133,7 +142,8 @@ module EO
       # @param field [Hash] a schema field descriptor
       # @return [String]
       def tooltip(editor, field)
-        [field['help'].to_s.strip, provenance(editor, field), field['key'].to_s].reject(&:empty?).join("\n\n")
+        measured = units(field).empty? ? '' : "In #{units(field)}."
+        [field['help'].to_s.strip, measured, provenance(editor, field), field['key'].to_s].reject(&:empty?).join("\n\n")
       end
 
       # @param editor [Editor] the editing session
