@@ -212,11 +212,17 @@ module EO::Engine
     # the room-scoped state (Engage's (room) commands, Loot's looted
     # list, Survival's flags) resets even when a fight is already waiting
     # in the new room and a follower never wanders.
+    #
+    # Keyed on the game's room uid as well as the map id: the map id is
+    # nil in every unmapped room, so two of them in a row compared equal
+    # and the transition was never announced.
     def note_room
-      id = @world.room.id
-      return if id == @room_id
+      room = @world.room
+      id = room.id
+      key = [room.respond_to?(:uid) ? room.uid : nil, id]
+      return if key == @room_key
 
-      @room_id = id
+      @room_key = key
       Events.emit(:entered_room, room: id)
     end
 

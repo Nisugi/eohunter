@@ -345,6 +345,24 @@ RSpec.describe EO::Engine::Engine do
     expect(seen).to eq([[1, :event], :fight, [2, :event], :fight, :fight])
   end
 
+  # The transition was keyed on the map id, nil in every unmapped room:
+  # two of them in a row compared nil == nil and the room-scoped resets
+  # (Engage, Loot, Survival) never fired.
+  it 'announces each unmapped room by its game uid, with the nil map id in the event' do
+    seen = []
+    EO::Engine::Events.on(:entered_room) { |e| seen << e.data[:room] }
+    walker = behavior(priority: 50, wants: true)
+    engine = described_class.new(world: world, behaviors: [walker], interval: 0)
+    engine.tick
+    world.unmapped = true
+    world.uid = 101
+    engine.tick
+    engine.tick
+    world.uid = 102
+    engine.tick
+    expect(seen).to eq([1, nil, nil])
+  end
+
   it 'run loops until stopped and reports the reason' do
     counter = 0
     b = behavior(priority: 0, wants: true)
