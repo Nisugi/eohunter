@@ -162,6 +162,22 @@ RSpec.describe EO::Engine::Maintain::Signs do
     expect(due('rapid (ignore)')).to eq(:cast)
   end
 
+  # "rapidfire" and "rapid fire" parsed as rapid plus the argument "fire",
+  # which rapid_due? took for the ignore word: 515 was recast during Rapid
+  # Fire Recovery for anyone who spelled the entry that way.
+  it 'reads rapidfire and rapid fire as a bare 515, and still takes an argument after the word' do
+    entries = ['rapidfire', 'rapid fire', 'rapid', '515', '515 ignore', 'rapidfire (ignore)', 'rapid fire ignore', 'rapid (ignore)']
+    signs = described_class.parse(entries)
+    expect(signs.map(&:kind).uniq).to eq([:rapid])
+    expect(signs.map(&:args)).to eq([[nil], [nil], [nil], [nil], ['ignore'], ['ignore'], ['ignore'], ['ignore']])
+
+    spell(515)
+    me.define_singleton_method(:cooldown_active?) { |n| n == 'Rapid Fire Recovery' }
+    expect(due('rapidfire')).to be_nil
+    expect(due('rapid fire')).to be_nil
+    expect(due('rapidfire (ignore)')).to eq(:cast)
+  end
+
   it 'gates the weapon blesses on the look result' do
     spell(902); spell(411)
     expect(due('902')).to eq(:cast)
