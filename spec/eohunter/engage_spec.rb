@@ -11,10 +11,18 @@ unless defined?(EngageScripts)
   class EngageScripts
     attr_reader :started, :killed
 
-    def initialize = (@started = []; @killed = [])
+    # linger: how many running? calls after a kill still answer true (a
+    # script unwinding its cleanup hooks)
+    def initialize(linger: 0) = (@started = []; @killed = []; @linger = linger)
     def start(name, args = nil) = @started << [name, args]
-    def running?(name) = @started.any? { |n, _| n == name } && !@killed.include?(name)
     def kill(name) = @killed << name
+
+    def running?(name)
+      return false unless @started.any? { |n, _| n == name }
+      return true unless @killed.include?(name)
+
+      (@linger -= 1) >= 0
+    end
   end
 end
 
@@ -824,6 +832,37 @@ RSpec.describe EO::Engine::Behaviors::Engage do
       expect(run_script).to have_attributes(status: :skipped, reason: :interrupted)
       expect(slept).to be_empty
       expect(scripts.killed).to eq(['bigloot'])
+    end
+
+    # Lich's kill is a request: the script's cleanup hooks still run, and
+    # can still send commands, after it. The tick is held until the child
+    # has actually stopped, and a child that never does fails the line
+    # under its own name.
+    context 'when the killed child takes a while to stop' do
+      let(:scripts) { EngageScripts.new(linger: 3) }
+
+      it 'holds the tick until the child has stopped' do
+        expect(run_script).to have_attributes(status: :failed, reason: :timeout)
+        expect(scripts.running?('bigloot')).to be false
+        expect(slept.last(3)).to eq([0.1, 0.1, 0.1])
+      end
+
+      it 'holds the tick for the stop on interruption too' do
+        allow(EO::Engine::Actions::Base).to receive(:respond_to?).with(:interrupt).and_return(true)
+        allow(EO::Engine::Actions::Base).to receive(:interrupt).and_return(-> { true })
+        expect(run_script).to have_attributes(status: :skipped, reason: :interrupted)
+        expect(slept).to eq([0.1, 0.1, 0.1])
+      end
+    end
+
+    context 'when the killed child never stops' do
+      let(:scripts) { EngageScripts.new(linger: 1_000) }
+
+      it 'fails the line as stuck after the bounded wait' do
+        expect(run_script).to have_attributes(status: :failed, reason: :script_stuck, line: 'bigloot')
+        expect(slept.last).to eq(0.1)
+        expect(slept.sum).to be_within(1).of(EO::Engine::Behaviors::Engage::SCRIPT_TIMEOUT + EO::Engine::Behaviors::Engage::SCRIPT_STOP_WAIT)
+      end
     end
   end
 end

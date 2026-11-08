@@ -1060,6 +1060,10 @@ module EO::Engine
       # The longest a routine's `script name` holds the tick for its child;
       # the old 200 x 0.25 s wait, now with a kill and a failure at the end.
       SCRIPT_TIMEOUT = 50
+      # Seconds a killed child is given to finish stopping before the tick
+      # is released: Lich's kill is a request, and the script's own cleanup
+      # hooks can still send commands while it unwinds.
+      SCRIPT_STOP_WAIT = 5
 
       def grouped? = !@group.nil? && !@group.solo?
 
@@ -1532,24 +1536,36 @@ module EO::Engine
       # running at the deadline is killed and the line failed: left alone
       # it kept running under the next line, and the line read :success.
       def run_script(name, args)
-        if @scripts.running?(name)
-          @scripts.kill(name)
-          20.times { break unless @scripts.running?(name); sleep 0.1 }
-        end
+        stop_script(name) if @scripts.running?(name)
         @scripts.start(name, args.to_s.empty? ? nil : args)
         deadline = @clock.now + SCRIPT_TIMEOUT
         while @scripts.running?(name)
           if Actions::Base.respond_to?(:interrupt) && Actions::Base.interrupt&.call
-            @scripts.kill(name)
+            stop_script(name)
             return Actions::Result.new(status: :skipped, reason: :interrupted)
           end
           if @clock.now >= deadline
-            @scripts.kill(name)
-            return Actions::Result.new(status: :failed, reason: :timeout, line: name)
+            # A child that will not stop is still on the wire: the line
+            # fails on that, not on the timeout, so the stop names it.
+            return Actions::Result.new(status: :failed, reason: stop_script(name) ? :timeout : :script_stuck, line: name)
           end
           sleep 0.25
         end
         Actions::Result.new(status: :success, reason: :script_ran)
+      end
+
+      # Kill the child and wait, bounded, until it has actually stopped.
+      #
+      # @return [Boolean] true when it is gone
+      def stop_script(name)
+        @scripts.kill(name)
+        deadline = @clock.now + SCRIPT_STOP_WAIT
+        while @scripts.running?(name)
+          return false if @clock.now >= deadline
+
+          sleep 0.1
+        end
+        true
       end
 
       def unsupported(line)
