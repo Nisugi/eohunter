@@ -883,8 +883,17 @@ module EO::Engine
         @maintain_state = maintain_state
         @scripts = scripts || EO::Engine::Behaviors::Rest::LichScripts
         @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
-        @turbo_stance = ->(name) { ::Lich::Gemstone::Stance.change(name, wait: false) }
         @turbo_send = ->(command) { put(command) }
+        # Lich's Stance.change(wait: false) still goes through fput, which
+        # waits for the game. A percentage stance keeps it: only Lich knows
+        # the command for one.
+        @turbo_stance = lambda do |name|
+          next ::Lich::Gemstone::Stance.change(name) if name.to_s =~ /\A\d/
+          next true if ::Lich::Gemstone::Stance.at?(name)
+
+          @turbo_send.call("stance #{name}")
+          true
+        end
         @turbo_sent_at = nil
         @group = group
         @fried = fried || -> { false }
