@@ -1050,10 +1050,16 @@ module EO::Engine
         return called if called
         return Actions::Result.new(status: :failed, reason: :no_routine) if @routine.empty?
 
-        line = @routine[@cursor]
-        result = run_line(world, line)
-        held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
-        @cursor = (@cursor + 1) % @routine.size unless held_preparation
+        # A line whose condition is not met sent nothing, so it need not
+        # cost a tick: on to the next until one acts, at most once around.
+        result = nil
+        @routine.size.times do
+          line = @routine[@cursor]
+          result = run_line(world, line)
+          held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
+          @cursor = (@cursor + 1) % @routine.size unless held_preparation
+          break unless result&.skipped? && result.reason == :condition
+        end
         result
       end
 

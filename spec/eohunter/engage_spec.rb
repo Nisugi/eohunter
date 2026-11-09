@@ -533,12 +533,13 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     me.current_target_id = '1'
     engage.tick(world)
     expect(calls.last).to eq([:cast, { spell: 1030, extra: nil, incant: false, target: '1' }])
-    # the once line is registered, so the third tick wraps to attack and the fourth skips it
+    # the once line is registered, so the third tick wraps to attack and the
+    # fourth passes over it to attack again, without losing a tick to it
     engage.tick(world)
-    skipped = engage.tick(world)
-    expect(skipped.reason).to eq(:condition)
-    expect(skipped.status).to eq(:skipped)
-    expect(skipped.failed?).to be(false)
+    casts = calls.count { |c| c.first == :cast }
+    engage.tick(world)
+    expect(calls.last.first).to eq(:attack)
+    expect(calls.count { |c| c.first == :cast }).to eq(casts)
   end
 
   # bigshot spell_is_selfcast? 5785: only 506/902/411 were handled, so a
@@ -663,6 +664,37 @@ RSpec.describe EO::Engine::Behaviors::Engage do
         EO::Engine::Actions::Result.new(status: :success, line: line)
       end
       expect(action.send(:perform).reason).to eq(:target_left)
+    end
+  end
+
+  describe 'lines whose condition is not met' do
+    def routine_of(*texts)
+      engage.instance_variable_set(:@routine, texts.map { |t| EO::Engine::Engage::Routine.parse(t).first })
+      engage.instance_variable_set(:@cursor, 0)
+    end
+
+    before do
+      engage.instance_variable_set(:@target, world.room.targets.first)
+      allow(engage).to receive(:next_target).and_return(world.room.targets.first)
+      allow(engage).to receive(:ensure_targeted).and_return(nil)
+    end
+
+    it 'runs the next line in the same tick' do
+      routine_of('first', 'second', 'third')
+      allow(EO::Engine::Engage::Conditions).to receive(:blocked_by) { |line, *| line.text == 'second' ? nil : 'nope' }
+      ran = []
+      allow(engage).to receive(:dispatch) { |_w, text, _l| ran << text; EO::Engine::Actions::Result.new(status: :success) }
+      expect(engage.tick(world)).to be_success
+      expect(ran).to eq(['second'])
+      expect(engage.instance_variable_get(:@cursor)).to eq(2)
+    end
+
+    it 'stops after one lap when nothing can run' do
+      routine_of('first', 'second')
+      allow(EO::Engine::Engage::Conditions).to receive(:blocked_by).and_return('nope')
+      expect(EO::Engine::Engage::Conditions).to receive(:blocked_by).twice
+      expect(engage.tick(world).reason).to eq(:condition)
+      expect(engage.instance_variable_get(:@cursor)).to eq(0)
     end
   end
 
