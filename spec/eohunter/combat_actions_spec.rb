@@ -139,11 +139,12 @@ RSpec.describe 'combat actions' do
 
     it 'classifies blocked, no target, cannot prepare, no mana and fizzle' do
       {
-        'Be at peace my child, there is no need for spells of war in here.' => :blocked,
-        'Cast at what?'                                                     => :no_target,
-        "You can't think clearly enough to prepare a spell!"                => :cannot_prepare,
-        "But you don't have any mana!"                                      => :no_mana,
-        'Your magic fizzles ineffectually.'                                 => :fizzled
+        'Be at peace my child, there is no need for spells of war in here.'                                                                                                       => :blocked,
+        'Cast at what?'                                                                                                                                                           => :no_target,
+        "You can't think clearly enough to prepare a spell!"                                                                                                                      => :cannot_prepare,
+        "The incantations of countless spells swirl through your mind as a golden light flashes before your eyes.  You can't seem to recall how to prepare the Rapid Fire spell!" => :cannot_recall,
+        "But you don't have any mana!"                                                                                                                                            => :no_mana,
+        'Your magic fizzles ineffectually.'                                                                                                                                       => :fizzled
       }.each do |line, reason|
         allow(spell).to receive(:cast).and_return(line)
         expect(cast(target: kobold).call.reason).to eq(reason)

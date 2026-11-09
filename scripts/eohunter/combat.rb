@@ -159,6 +159,11 @@ module EO::Engine
       HINDERED  = /^\[Spell Hindrance for/
       # The spell fizzled.
       FIZZLED   = /^Your magic fizzles ineffectually\.$/
+      # The game will not let us prepare a spell Lich reckons we know (seen
+      # with an SK 515 that was not active). Unmatched,
+      # this fell through to success, so a cast that never went out reset the
+      # failure streak: `incant 515` went out 48 times in four seconds.
+      CANNOT_RECALL = /You can't seem to recall how to prepare the .+ spell!/
       # Every answer that means the prepare itself was refused.
       CANNOT_PREPARE = /^You can't think clearly enough to prepare a spell!$|^You are too injured to make that dextrous of a movement|^You can't make that dextrous of a move!$|^The searing pain in your throat makes that impossible|^All you manage to do is cough up some blood\.$|^You do not know that spell!$|^That is not something you can prepare\./
       # No mana at all.
@@ -219,6 +224,7 @@ module EO::Engine
           line = answer.to_s
           return Result.new(status: :failed, reason: :blocked, line: line) if line =~ BLOCKED
           return Result.new(status: :failed, reason: :no_target, line: line) if line =~ NO_TARGET
+          return Result.new(status: :failed, reason: :cannot_recall, line: line) if line =~ CANNOT_RECALL
           return Result.new(status: :failed, reason: :cannot_prepare, line: line) if line =~ CANNOT_PREPARE
           return Result.new(status: :failed, reason: :no_mana, line: line) if line =~ NO_MANA
           return Result.new(status: :failed, reason: :fizzled, line: line) if line =~ FIZZLED
