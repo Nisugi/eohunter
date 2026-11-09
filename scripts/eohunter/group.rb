@@ -2288,13 +2288,20 @@ module EO::Engine
       # @return [Boolean] true
       def independent! = @independent = true
 
-      # Not while independent; always mid-trip; else when the leader is
-      # not here or we are not in the group.
+      # Not while independent, or parked in the resting room while the
+      # leader rests; always mid-trip; else when the leader is not here or
+      # we are not in the group.
       #
       # @param world [World]
       # @return [Boolean]
       def wants_control?(world)
         return false if @independent
+
+        @rejoin = false if leader_here?(world)
+        if parked?(world)
+          cancel! if @trip
+          return false
+        end
         return true if @trip
 
         !leader_here?(world) || !grouped?(world)
@@ -2311,7 +2318,8 @@ module EO::Engine
         end
 
         unless leader_here?(world)
-          room = @member.leader_room
+          room = destination
+          cancel! if @trip && @trip.place.to_s != room.to_s
           current_room = world.room.id
           # Native map resolution can yield while group movement fills the
           # new room's PC list. Recheck presence after that read before using
@@ -2351,6 +2359,22 @@ module EO::Engine
       def grouped?(world)
         leader = @member.leader_name.to_s
         world.group_leader_noun.to_s == leader || world.group_nouns.include?(leader)
+      end
+
+      # While the leader rests it may go where a follower cannot walk (a
+      # town across the water to sell). Unless a follow_now calls us back,
+      # the resting room is where to wait, not wherever the leader went.
+      def resting_room
+        return nil if @rejoin || @member.leader_phase != :resting
+
+        (@member.rooms || {})[:resting]
+      end
+
+      def destination = resting_room || @member.leader_room
+
+      def parked?(world)
+        room = resting_room
+        !room.nil? && room.to_s == world.room.id.to_s && !leader_here?(world)
       end
     end
   end

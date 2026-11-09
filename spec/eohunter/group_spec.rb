@@ -767,6 +767,43 @@ RSpec.describe EO::Engine::Behaviors::Follow do
     expect(trips).to eq([9])
   end
 
+  describe 'while the leader rests' do
+    before do
+      hub.heartbeat!(name: 'Lead', room: 17_589, phase: :resting)
+      member.leader_state
+      room.players = []
+    end
+
+    it 'waits in the resting room rather than chasing the leader' do
+      room.id = 100
+      expect(follow.wants_control?(world)).to be false
+    end
+
+    it 'goes to the resting room, not to the leader, from anywhere else' do
+      room.id = 50
+      expect(follow.wants_control?(world)).to be true
+      follow.tick(world)
+      expect(trips).to eq([100])
+    end
+
+    it 'goes to the leader again when a follow_now calls it back' do
+      room.id = 100
+      follow.rejoin!
+      expect(follow.wants_control?(world)).to be true
+      follow.tick(world)
+      expect(trips).to eq([17_589])
+    end
+
+    it 'forgets an old call-back once the leader has been here' do
+      room.id = 100
+      follow.rejoin!
+      room.players = [player('Lead')]
+      follow.wants_control?(world)
+      room.players = []
+      expect(follow.wants_control?(world)).to be false
+    end
+  end
+
   it 'does not backtrack to a stale leader room when group movement completes during its room read' do
     hub.heartbeat!(name: 'Lead', room: 32763, phase: :hunting)
     member.leader_state
