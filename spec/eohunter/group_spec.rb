@@ -1197,7 +1197,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(orders_sent).to eq(%i[follow_now])
     expect(rest.phase).to eq(:signs) # the leader publishes signs_phase? from here
     expect(rest.signs_phase?).to be true
-    hub.report('Bob', report('Bob', rt: true)) # Bob is casting his
+    hub.report('Bob', report('Bob', rt: true)) # Bob is in roundtime
     rest.tick(world)
     expect(rest.phase).to eq(:signs)
     hub.report('Bob', report('Bob'))

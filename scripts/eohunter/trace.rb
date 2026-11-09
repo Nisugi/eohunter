@@ -31,7 +31,7 @@ module EO::Engine
                  unarmed_followup unarmed_tier ammo_no_effect untargetable_learned],
       movement: %i[travel_started travel_arrived travel_failed travel_suspended entered_room out_of_bounds
                    fog_return tracked uncovered hidden_arrival],
-      rest: %i[rest_started resting rested rest_finished rest_destination rest_retry rest_stuck rest_stranded
+      rest: %i[signs_held rest_started resting rested rest_finished rest_destination rest_retry rest_stuck rest_stranded
                rest_service_failed town_rest_complete final_loot_done overkill loot_script_started loot_stuck],
       group: %i[order followers_ready waiting_for_followers follower_lost loot_assigned hunt_over hunt_ended
                 coordination_return_required],

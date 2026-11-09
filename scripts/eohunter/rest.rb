@@ -1243,7 +1243,7 @@ module EO::Engine
         else
           result = @cast_signs&.call(world)
           return result if result
-          return Actions::Result.new(status: :skipped, reason: :followers_casting) if grouped? && @group.roundtime?
+          return Actions::Result.new(status: :skipped, reason: :followers_in_roundtime) if grouped? && @group.roundtime?
         end
 
         if grouped?
