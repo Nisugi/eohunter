@@ -166,6 +166,10 @@ module EO::Engine
       # @return [Actions::Result] the STAND that got us up, or failed
       #   with :still_down
       def perform
+        # The roundtime just slept out may be a long one (a charge gives 20
+        # seconds), and a groupmate may have pulled us up during it.
+        return Result.new(status: :skipped, reason: :already_standing) if me.standing?
+
         # Lich's Stance.at?: already in the stand stance means nothing to
         # change and nothing to restore (a regex on the stance word read
         # "advance" as "advanced" and could not read a percentage stance).
