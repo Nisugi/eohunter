@@ -33,6 +33,19 @@ module EO::Engine
                      archery_aim: [], aim: [], tier3: 'punch', uac_smite: false, uac_mstrike: false, ammo_container: nil,
                      fresh_wand_container: nil, dead_wand_container: nil, wand: [], weapon_reaction: true, preparations: nil, turbo: false) = super
 
+      # How much of target, stance and command goes out without waiting:
+      # nil waits for each, :stance batches stance and command after a
+      # confirmed TARGET, :all batches the three. Type-ahead is why it is a
+      # choice. The profile's true means :all.
+      #
+      # @return [Symbol, nil]
+      def turbo_mode
+        case turbo.to_s.downcase
+        when 'true', 'all' then :all
+        when 'stance' then :stance
+        end
+      end
+
       # find_routine: the letter's list, else the default (a).
       #
       # @bigshot find_routine
@@ -1209,9 +1222,9 @@ module EO::Engine
         @state.routines_reset!(moved: false)
         @state.unarmed_tier = 1
 
-        # Turbo: send it and go, so TARGET, stance and the line land together.
+        # Turbo all: send it and go, so TARGET, stance and the line land together.
         # A roundtime would refuse them; a preparation wants the answer first.
-        if turbo_now?(world) && !named_preparation?(@routine[@cursor]&.text)
+        if @policy.turbo_mode == :all && turbo_now?(world) && !named_preparation?(@routine[@cursor]&.text)
           @turbo_send.call("target ##{@target.id}")
           @turbo_sent_at = @clock.now
           return nil
@@ -1220,7 +1233,7 @@ module EO::Engine
         probe_target(world)
       end
 
-      def turbo_now?(world) = @policy.turbo == true && !world.me.in_rt? && !world.me.in_cast_rt?
+      def turbo_now?(world) = !@policy.turbo_mode.nil? && !world.me.in_rt? && !world.me.in_cast_rt?
 
       def hunting_stance_for(world)
         (turbo_now?(world) ? @turbo_stance : @stance).call(@policy.hunting_stance)

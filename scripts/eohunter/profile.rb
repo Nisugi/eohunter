@@ -51,7 +51,7 @@ module EO::Engine
       'hunting_loadout_sets' => [:structured, {}], 'hunting_loadout_rules' => [:structured, []],
       'hunting_prep_commands' => [:split_xx, []], 'hunting_scripts' => [:split, []], 'signs' => [:split, []],
       'loot_script' => [:string, nil], 'wracking_spirit' => [:to_i, 0],
-      'turbo' => [:bool, false], 'priority' => [:bool, false], 'delay_loot' => [:bool, false], 'use_wracking' => [:bool, false], 'loot_stance' => [:bool, false],
+      'turbo' => [:string, 'off'], 'priority' => [:bool, false], 'delay_loot' => [:bool, false], 'use_wracking' => [:bool, false], 'loot_stance' => [:bool, false],
       'pull' => [:bool, true], 'deader' => [:bool, false], 'sneaky_sneaky' => [:bool, false], 'check_favor' => [:bool, false],
       'ambush' => [:split, []], 'archery_aim' => [:split, []], 'flee_count' => [:to_i, 100], 'invalid_targets' => [:split, []],
       'always_flee_from' => [:split, []], 'flee_message' => [:regex, nil], 'wander_wait' => [:to_f, 0.3],

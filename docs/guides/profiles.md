@@ -251,7 +251,7 @@ overweight; the grace does not relax recovery thresholds.
 | `signs` | split | none | Maintain: the signs, spells and symbols to keep up; `650 panther evoke` style entries work |
 | `bless` | bool | false | Maintain: Voln's bless on the weapon |
 | `check_favor` | bool | false | Maintain: skip a symbol the favor cannot pay for |
-| `turbo` | bool | false | Engage: send TARGET, the stance and the first line together rather than waiting for each answer; falls back to a normal TARGET if it did not land within a second. Not in the setup editor yet |
+| `turbo` | string | off | Engage: `off` waits for each of TARGET, stance and command; `stance` waits for TARGET, then sends stance and command together; `all` (or `true`) sends all three together, and falls back to a normal TARGET if it did not land within a second. Not in the setup editor yet |
 | `priority` | bool | false | Engage: the first target in the profile's order rather than the nearest |
 | `targets` | targets | none | Targets: what to fight and with which routine |
 | `quickhunt_targets` | targets | none | Targets: the quick routine's targets |

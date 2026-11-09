@@ -735,6 +735,30 @@ RSpec.describe EO::Engine::Behaviors::Engage do
       expect(calls.map(&:first)).to eq([:attack])
     end
 
+    it 'with stance, confirms TARGET and batches only stance and command' do
+      policy.turbo = 'stance'
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(calls.map(&:first)).to eq(%i[target attack])
+      expect(quick_stances).to eq(['defensive'])
+    end
+
+    it 'with off, or nothing set, waits for everything' do
+      ['off', nil, false].each do |value|
+        policy.turbo = value
+        expect(policy.turbo_mode).to be_nil
+      end
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(quick_stances).to eq([])
+    end
+
+    it 'reads the profile word' do
+      expect(EO::Engine::Profile.new({ 'turbo' => 'stance' }).engage_policy.turbo_mode).to eq(:stance)
+      expect(EO::Engine::Profile.new({ 'turbo' => true }).engage_policy.turbo_mode).to eq(:all)
+      expect(EO::Engine::Profile.new({}).engage_policy.turbo_mode).to be_nil
+    end
+
     it 'waits for answers as usual in roundtime' do
       me.define_singleton_method(:in_rt?) { true }
       engage.tick(world)
