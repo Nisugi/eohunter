@@ -97,7 +97,11 @@ RSpec.describe 'combat actions' do
   describe EO::Engine::Actions::Cast do
     let(:spell) { double('Spell', known?: true, affordable?: true) }
 
-    before { stub_const('Spell', Class.new { def self.[](_n); end }) }
+    before do
+      stub_const('Spell', Class.new { def self.[](_n); end })
+      described_class.reset_refused!
+    end
+    after { described_class.reset_refused! }
 
     def cast(**opts)
       allow(Spell).to receive(:[]).with(1030).and_return(spell)
@@ -137,6 +141,42 @@ RSpec.describe 'combat actions' do
       expect(cast(incant: true, target: kobold).call).to be_success
     end
 
+    describe 'a refused prepare' do
+      let(:recall) { "The incantations of countless spells swirl through your mind as a golden light flashes before your eyes.  You can't seem to recall how to prepare the Rapid Fire spell!" }
+
+      it 'gives a spell we do not know up for the run' do
+        expect(spell).to receive(:cast).once.and_return('You do not know that spell!')
+        expect(cast.call.reason).to eq(:not_known)
+        result = cast.call
+        expect(result).to be_skipped
+        expect(result.reason).to eq(:spell_not_known)
+      end
+
+      it 'holds a spell through the debuff, and tries it again after' do
+        now = Time.at(1000)
+        allow(Time).to receive(:now) { now }
+        debuff = true
+        me.define_singleton_method(:debuff_active?) { |_n| debuff }
+        expect(spell).to receive(:cast).twice.and_return(recall, 'Cast Roundtime 3 Seconds.')
+        expect(cast.call.reason).to eq(:cannot_recall)
+        expect(cast.call.reason).to eq(:spell_held)
+        now += 10
+        expect(cast.call.reason).to eq(:spell_held)
+        debuff = false
+        expect(cast.call).to be_success
+      end
+
+      it 'does not hold past the limit when the debuff never clears' do
+        now = Time.at(1000)
+        allow(Time).to receive(:now) { now }
+        me.define_singleton_method(:debuff_active?) { |_n| true }
+        expect(spell).to receive(:cast).twice.and_return(recall, 'Cast Roundtime 3 Seconds.')
+        cast.call
+        now += described_class::HOLD_MAX
+        expect(cast.call).to be_success
+      end
+    end
+
     it 'classifies blocked, no target, cannot prepare, no mana and fizzle' do
       {
         'Be at peace my child, there is no need for spells of war in here.'                                                                                                       => :blocked,
@@ -146,6 +186,7 @@ RSpec.describe 'combat actions' do
         "But you don't have any mana!"                                                                                                                                            => :no_mana,
         'Your magic fizzles ineffectually.'                                                                                                                                       => :fizzled
       }.each do |line, reason|
+        described_class.reset_refused!
         allow(spell).to receive(:cast).and_return(line)
         expect(cast(target: kobold).call.reason).to eq(reason)
       end

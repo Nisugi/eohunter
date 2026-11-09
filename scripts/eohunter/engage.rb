@@ -1075,13 +1075,15 @@ module EO::Engine
           result = run_line(world, line)
           held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
           @cursor = (@cursor + 1) % @routine.size unless held_preparation
-          break unless result&.skipped? && result.reason == :condition
+          break unless result&.skipped? && PASSED_OVER.include?(result.reason)
         end
         result
       end
 
       private
 
+      # Skips that cost nothing: on to the next line in the same tick.
+      PASSED_OVER = %i[condition spell_not_known spell_held].freeze
       ATTACK_ORDER_EVERY = 10 # do_hunt 7383: a new target, or every ten seconds
       CALL_BACK_EVERY = 10
       # The longest a routine's `sleep N` may hold the tick. bigshot has no
