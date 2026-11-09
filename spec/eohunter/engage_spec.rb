@@ -717,6 +717,41 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     end
   end
 
+  describe 'turbo' do
+    let(:sent) { [] }
+    let(:quick_stances) { [] }
+
+    before do
+      policy.turbo = true
+      engage.instance_variable_set(:@turbo_send, ->(c) { sent << c })
+      engage.instance_variable_set(:@turbo_stance, ->(s) { quick_stances << s })
+    end
+
+    it 'sends TARGET without waiting, then the stance and the line in the same tick' do
+      expect(EO::Engine::Actions::Target).not_to receive(:new)
+      engage.tick(world)
+      expect(sent).to eq(['target #1'])
+      expect(quick_stances).to eq(['defensive'])
+      expect(calls.map(&:first)).to eq([:attack])
+    end
+
+    it 'waits for answers as usual in roundtime' do
+      me.define_singleton_method(:in_rt?) { true }
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(calls.first.first).to eq(:target)
+    end
+
+    it 'probes properly when the TARGET did not land' do
+      engage.tick(world)
+      engage.instance_variable_set(:@turbo_sent_at, Time.now - 5)
+      allow(engage.instance_variable_get(:@clock)).to receive(:now).and_return(Time.now)
+      engage.tick(world)
+      expect(calls.map(&:first)).to include(:target)
+      expect(engage.instance_variable_get(:@turbo_sent_at)).to be_nil
+    end
+  end
+
   it 'learns an untargetable name from the probe and moves on' do
     refused = EO::Engine::Actions::Result.new(status: :failed, reason: :untargetable)
     allow(EO::Engine::Actions::Target).to receive(:new).and_return(instance_double(EO::Engine::Actions::Target, call: refused))
