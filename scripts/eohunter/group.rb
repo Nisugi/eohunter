@@ -274,7 +274,7 @@ module EO::Engine
       me = world.me
       overweight = encumbrance&.ready?(me.encumbrance_pct, threshold: rest_policy.encumbered_pct, looting: looting)
       Report.new(
-        name: name, room: world.room.id, rt: me.in_rt? || me.in_cast_rt?, hidden: me.hidden?, sneaky: sneaky,
+        name: name, room: world.room.id, rt: me.in_rt?, hidden: me.hidden?, sneaky: sneaky,
         looting: looting, rest_prep_done: rest_prep_done,
         rest_reason: Rest::Predicates.rest_reason(me, rest_policy, counters, forced: forced, looting: looting, encumbered: overweight),
         not_hunting_reason: Rest::Predicates.not_hunting_reason(me, rest_policy),
@@ -1132,7 +1132,9 @@ module EO::Engine
       def looting_done? = reports.values.none?(&:looting)
 
       # Movement would be refused during roundtime anyway; the barrier
-      # saves the sends anyone would otherwise burn discovering that.
+      # saves the sends anyone would otherwise burn discovering that. Cast
+      # roundtime does not stop anyone walking, so it is not reported
+      # (bigshot's rt? is checkrt, without the cast half).
       # @bigshot Bigshot::Group
       # @return [Boolean] true when any online follower is in roundtime
       def roundtime? = reports.values.any?(&:rt)
@@ -1741,7 +1743,7 @@ module EO::Engine
       REORDER = 10
 
       # Why the hold, from the last wants_control?: :member_stunned,
-      # :member_roundtime, :follower_missing, :followers_looting,
+      # :member_down, :member_roundtime, :follower_missing, :followers_looting,
       # :prepare_movement or :movement_barrier; nil when not holding.
       #
       # @return [Symbol, nil]
@@ -1769,8 +1771,8 @@ module EO::Engine
       def priority = strict_movement? ? 45 : 15
 
       # Reports newly lost followers, then decides whether to hold: not
-      # when solo, resting or fighting; else for a stunned or roundtimed
-      # member, a missing follower, or the movement barrier.
+      # when solo, resting or fighting; else for a stunned, downed or
+      # roundtimed member (Survival, above us, pulls a downed one up), a missing follower, or the movement barrier.
       #
       # @param world [World]
       # @return [Boolean] true when there is a reason to hold
@@ -1790,6 +1792,7 @@ module EO::Engine
         reset_movement(world.room.id) if @movement_room != world.room.id
 
         @reason = if EO::Engine::Survival::Predicates.group_member_stunned?(world) then :member_stunned
+                  elsif EO::Engine::Survival::Predicates.group_member_down?(world) then :member_down
                   elsif @leader.roundtime? then :member_roundtime
                   elsif !@leader.all_present?(world) then :follower_missing
                   elsif strict_movement? then strict_reason(world)
@@ -1811,7 +1814,7 @@ module EO::Engine
       # @param world [World]
       # @return [Actions::Result, nil] the step's result, nil when only waiting
       def tick(world)
-        return nil if %i[member_stunned member_roundtime followers_looting].include?(@reason)
+        return nil if %i[member_stunned member_down member_roundtime followers_looting].include?(@reason)
         if @reason == :prepare_movement
           if strict_movement?
             return nil unless @leader.prepare_movement(world.room.id, room_epoch: world.room.count)
@@ -2008,7 +2011,9 @@ module EO::Engine
       def tick(world)
         return step(world) unless @phase == :idle
         if @pending_ack
-          return nil if world.me.in_rt? || world.me.in_cast_rt?
+          # Roundtime only: the leader's barrier waits on this ack, and cast
+          # roundtime does not stop anyone walking.
+          return nil if world.me.in_rt?
 
           type = @pending_ack
           @pending_ack = nil

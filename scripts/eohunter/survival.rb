@@ -94,6 +94,15 @@ module EO::Engine
         Array(world.room.players).any? { |p| p.status.to_s =~ STUNNED && nouns.include?(p.noun.to_s) }
       end
 
+      # A living group member on the ground: nobody walks off and leaves them.
+      #
+      # @param world [World]
+      # @return [Boolean]
+      def group_member_down?(world)
+        nouns = world.group_nouns
+        Array(world.room.players).any? { |p| p.status.to_s =~ DOWN && p.status.to_s !~ /dead/ && nouns.include?(p.noun.to_s) }
+      end
+
       # In priority order: :dead, :trapped (an escape room), :deader (a dead
       # player to stop for), :prone (not standing, unless resting), :pull.
       #
@@ -310,8 +319,14 @@ module EO::Engine
         when :dead then died(world)
         when :trapped then Actions::Escape.new(world).call
         when :deader then deader(world)
-        when :prone then Actions::Stand.new(world, stance: @stance, stand_stance: @policy.stand_stance).call
-        when :pull then Actions::Pull.new(world, player: EO::Engine::Survival::Predicates.to_pull(world, @policy).first).call
+        when :prone
+          # Before the action, which blocks: the trace shows when it began.
+          Events.emit(:standing, room: world.room.id)
+          Actions::Stand.new(world, stance: @stance, stand_stance: @policy.stand_stance).call
+        when :pull
+          player = EO::Engine::Survival::Predicates.to_pull(world, @policy).first
+          Events.emit(:pulling, player: player.noun, status: player.status)
+          Actions::Pull.new(world, player: player).call
         end
       end
 

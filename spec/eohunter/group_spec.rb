@@ -917,6 +917,31 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.wants_control?(world)).to be false
   end
 
+  it 'holds while a group member is on the ground, and not for a dead one' do
+    room.players = [player('Bob', status: 'lying down')]
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:member_down)
+    expect(muster.tick(world)).to be_nil
+    room.players = [player('Bob', status: 'dead')]
+    muster.wants_control?(world)
+    expect(muster.reason).not_to eq(:member_down)
+  end
+
+  it 'does not report cast roundtime as roundtime' do
+    policy = EO::Engine::Rest::Policy.new
+    casting = OpenStruct.new(in_rt?: false, in_cast_rt?: true, encumbrance_pct: 0, hidden?: false, dead?: false, fxp_pct: 0, mana_pct: 100,
+                             spirit: 10, stamina_pct: 100)
+    casting.define_singleton_method(:debuff_level) { |_n| nil }
+    casting.define_singleton_method(:debuff_active?) { |_n| false }
+    built = EO::Engine::Group.report(OpenStruct.new(me: casting, room: room), name: 'Bob', rest_policy: policy,
+                                     counters: EO::Engine::Rest::Counters.new)
+    expect(built.rt).to be false
+    casting.define_singleton_method(:in_rt?) { true }
+    built = EO::Engine::Group.report(OpenStruct.new(me: casting, room: room), name: 'Bob', rest_policy: policy,
+                                     counters: EO::Engine::Rest::Counters.new)
+    expect(built.rt).to be true
+  end
+
   it 'holds between fights until every follower is out of roundtime' do
     hub.report('Bob', report('Bob', rt: true))
 
