@@ -322,6 +322,7 @@ module EO::Engine
         me = world.me
         s = world.spell[num]
         return nil if s.nil? || !s.known?
+        return nil if Actions::Cast.refusal(num, me)
         return nil if num == 9918
         return nil if VOLN_SYMBOLS.include?(num) && me.spell_active?(9012)
 

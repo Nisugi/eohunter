@@ -184,6 +184,26 @@ module EO::Engine
 
         # @return [void]
         def reset_refused! = @refused.clear
+
+        # A spell refused earlier: for good, or until its debuff has ended.
+        # Maintain asks this too, or it would keep claiming the tick for a
+        # sign that can only skip, and Engage would never run.
+        #
+        # @param number [Integer] the spell
+        # @param me [#debuff_active?]
+        # @return [Symbol, nil] :spell_not_known, :spell_held, or nil to try it
+        def refusal(number, me)
+          held = @refused[number]
+          return nil if held.nil?
+          return :spell_not_known if held == :not_known
+
+          age = Time.now - held
+          return :spell_held if age < HOLD_SETTLE
+          return :spell_held if age < HOLD_MAX && me.respond_to?(:debuff_active?) && me.debuff_active?(RECALL_DEBUFF)
+
+          @refused.delete(number)
+          nil
+        end
       end
 
       # Every answer that means the prepare itself was refused.
@@ -228,7 +248,7 @@ module EO::Engine
         return :unknown_spell if s.nil? || !s.known?
         return :unaffordable unless s.affordable?
 
-        refusal_gate || :ok
+        self.class.refusal(@spell_number, me) || :ok
       end
 
       # Cast through Spell#cast and classify its answer; a hindrance is
@@ -265,20 +285,6 @@ module EO::Engine
       end
 
       private
-
-      # A spell refused earlier: for good, or until its debuff has ended.
-      def refusal_gate
-        held = self.class.refused[@spell_number]
-        return nil if held.nil?
-        return :spell_not_known if held == :not_known
-
-        age = Time.now - held
-        return :spell_held if age < HOLD_SETTLE
-        return :spell_held if age < HOLD_MAX && me.respond_to?(:debuff_active?) && me.debuff_active?(RECALL_DEBUFF)
-
-        self.class.refused.delete(@spell_number)
-        nil
-      end
 
       def refused(reason, state, line)
         self.class.refused[@spell_number] = state

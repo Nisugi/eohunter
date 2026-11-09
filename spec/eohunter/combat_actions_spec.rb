@@ -166,6 +166,23 @@ RSpec.describe 'combat actions' do
         expect(cast.call).to be_success
       end
 
+      it 'is not due to Maintain while refused, so it cannot hold the tick from Engage' do
+        me.define_singleton_method(:debuff_active?) { |_n| true }
+        s = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 5, name: 'Rapid Fire', last_cast: Time.at(0))
+        me.define_singleton_method(:spell_active?) { |_n| false }
+        here = OpenStruct.new(me: me, spell: { 515 => s })
+        policy = EO::Engine::Maintain::Policy.new
+        due = -> { EO::Engine::Maintain::Signs.spell_due(here, 515, policy, now: Time.now, renewal_cost: 0) }
+        before_refusal = due.call
+        described_class.refused[515] = :not_known
+        expect(due.call).to be_nil
+        described_class.refused[515] = Time.now
+        expect(due.call).to be_nil
+        described_class.reset_refused!
+        expect(due.call).to eq(before_refusal)
+        expect(before_refusal).not_to be_nil
+      end
+
       it 'does not hold past the limit when the debuff never clears' do
         now = Time.at(1000)
         allow(Time).to receive(:now) { now }
