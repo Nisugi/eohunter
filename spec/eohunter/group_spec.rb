@@ -794,6 +794,14 @@ RSpec.describe EO::Engine::Behaviors::Follow do
       expect(trips).to eq([17_589])
     end
 
+    it 'gives up a call-back it cannot walk, and goes back to waiting' do
+      room.id = 100
+      stuck = described_class.new(member: member, travel: ->(_r) { false })
+      stuck.rejoin!
+      5.times { stuck.tick(world) if stuck.wants_control?(world) }
+      expect(stuck.wants_control?(world)).to be false
+    end
+
     it 'forgets an old call-back once the leader has been here' do
       room.id = 100
       follow.rejoin!
@@ -1211,6 +1219,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     rest.tick(world)
     expect(rest.phase).to eq(:resting_prep_own)
     run_until(:rested)
+    room.id = policy.resting_room
     hub.report('Bob', report('Bob', rest_prep_done: false))
     rest.tick(world)
     expect(orders_sent).to eq(%i[resting_prep resting_scripts_start follow_now])
@@ -1229,6 +1238,27 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     rest.tick(world)
     expect(orders_sent).to eq(%i[resting_prep resting_scripts_start])
     expect(rest.phase).to eq(:resting_prep_own)
+  end
+
+  it 'gathers only after the resting scripts end and the leader is back at the resting room' do
+    me.mana_pct = 10
+    rest.wants_control?(world)
+    run_until(:rested)
+    allow(scripts).to receive(:running?).and_return(true)
+    allow(policy).to receive(:resting_script_list).and_return(['sell'])
+    room.id = 77
+    hub.take_orders('Bob')
+    rest.tick(world)
+    expect(rest.phase).to eq(:rested)
+    expect(orders_sent).to eq([])
+    allow(scripts).to receive(:running?).and_return(false)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rest_return)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rested)
+    room.id = policy.resting_room
+    rest.tick(world)
+    expect(rest.phase).to eq(:hold)
   end
 
   it 'holds the rest until every follower is ready too' do

@@ -2331,7 +2331,12 @@ module EO::Engine
             case EO::Engine::Travel.step(self, @travel, room, world)
             when :underway then return nil
             when :arrived then return Actions::Result.new(status: :success, reason: :arrived)
-            else return Actions::Result.new(status: :failed, reason: :could_not_reach)
+            else
+              # A call-back to a leader we cannot walk to, during its rest:
+              # back to the resting room rather than failing until the
+              # watchdog stops this follower.
+              @rejoin = false if @member.leader_phase == :resting
+              return Actions::Result.new(status: :failed, reason: :could_not_reach)
             end
           end
         end

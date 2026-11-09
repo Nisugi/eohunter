@@ -485,7 +485,7 @@ module EO::Engine
         select_site(site)
         @reason = reason
         @forced_reason = nil
-        return true if same_site && %i[leave fog custom_fog disband waypoints resting_room resting_prep resting_prep_own rested resting].include?(@phase)
+        return true if same_site && %i[leave fog custom_fog disband waypoints resting_room resting_prep resting_prep_own rested rest_return resting].include?(@phase)
 
         EO::Engine::Travel.cancel(self)
         @remaining = nil
@@ -620,6 +620,7 @@ module EO::Engine
         when :resting_prep then step_resting_prep(world)
         when :resting_prep_own then step_prep(world, @policy.resting_command_list, @policy.resting_script_list, :rested, wait_for_scripts: true)
         when :rested then step_rested(world)
+        when :rest_return then step_room(world, @policy.resting_room, :rested)
         when :resting then step_resting(world)
         when :hunting_prep then step_hunting_prep(world)
         when :hunting_prep_own then step_prep(world, @policy.hunting_prep_command_list, [], :rally_out, wait_for_scripts: true)
@@ -1034,6 +1035,18 @@ module EO::Engine
           @phase = :resting
           return nil
         end
+        # The resting scripts roam (eloot sell walks to town, somewhere the
+        # followers may not be able to go). The gather below calls them to
+        # us, so it waits for the scripts and for us to be back at the room
+        # they are waiting in.
+        return nil if @policy.resting_script_list.any? { |s| @scripts.running?(script_name(s)) }
+
+        if !@stranded && !@rest_returned && @policy.resting_room && world.room.id.to_s != @policy.resting_room.to_s
+          @rest_returned = true
+          @phase = :rest_return
+          return nil
+        end
+        @rest_returned = false
         Array(@after_prep).each { |o| @group.order(o, room: world.room.id) }
         @after_prep = nil
         Actions::GroupOpen.new(world).call
