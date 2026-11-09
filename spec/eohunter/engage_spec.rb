@@ -599,6 +599,16 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(calls.none? { |tag, _| tag == :cast }).to be(true)
   end
 
+  it 'leaves the stance alone for kweed, and not for weed' do
+    spells[610] = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 10, name: 'Tangleweed')
+    me.current_target_id = '1'
+    engage.instance_variable_set(:@target, world.room.targets.first)
+    engage.send(:run_line, world, EO::Engine::Engage::Routine.parse(['kweed']).first)
+    expect(stances).to eq([])
+    engage.send(:run_line, world, EO::Engine::Engage::Routine.parse(['weed']).first)
+    expect(stances).to eq(['defensive'])
+  end
+
   it 'casts kweed as an evoked 610 unless a weed is already down' do
     policy.routines['a'] = ['kweed(buff5)']
     spells[610] = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 10, name: 'Tangleweed')

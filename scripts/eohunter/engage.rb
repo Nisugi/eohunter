@@ -804,8 +804,9 @@ module EO::Engine
 
       # Lines sent as an Attack.
       VERBS = /^(?:attack|kill|jab|punch|kick|grapple|hurl)\b/
-      # Lines that do not get the hunting stance first.
-      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon)/i
+      # Lines that do not get the hunting stance first. kweed: the damaging
+      # vine no longer needs an offensive stance, from any stance it evokes.
+      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon|kweed)/i
       # Floor objects that mean a weed is already down (cmd_weed 4797).
       WEEDS = /\b(?:vine|bramble|widgeonweed|vathor club|swallowwort|smilax|creeper|briar|ivy|tumbleweed)\b/
       # A spell line: optional incant, the number, then the cast word and
