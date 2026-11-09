@@ -368,6 +368,8 @@ module EO::Engine
       REORDER = 10
       # Departure phases are outside the field recovery timeout.
       DEPARTURE_PHASES = %i[hunting_prep hunting_prep_own rally_out rally hunting_scripts signs hunting_scripts_own hunting_room arrived done].freeze
+      # Seconds to wait for the followers to answer a signs order
+      SIGNS_WAIT = 30
       # Ticks to wait for the game's group to empty after DISBAND
       DISBAND_TICKS = 40
       # Phases moving from a refuge toward the hunting area. A new rest
@@ -504,6 +506,7 @@ module EO::Engine
         @stranded = false
         @buff_serviced = false
         @buff_gate_started = nil
+        @signs_ordered_at = nil
         if final_loot && @loot
           @loot.final!
           @final_loot_ticks = 0
@@ -1241,17 +1244,37 @@ module EO::Engine
         if nomagic?(world)
           Events.emit(:signs_held, room: world.room.id, reason: :nomagic)
         else
+          order_signs(world)
           result = @cast_signs&.call(world)
           return result if result
-          return Actions::Result.new(status: :skipped, reason: :followers_in_roundtime) if grouped? && @group.roundtime?
+          return Actions::Result.new(status: :skipped, reason: :followers_casting_signs) if waiting_for_signs?
         end
 
+        @signs_ordered_at = nil
         if grouped?
           @group.order(:hunting_scripts_start, room: world.room.id)
           @group.order(:go2_hunting_room, room: world.room.id) if @group.policy.independent_travel
         end
         @phase = :hunting_scripts_own
         nil
+      end
+
+      def order_signs(world)
+        return if !grouped? || @signs_ordered_at
+
+        @signs_ordered_at = @clock.now
+        @group.order_signs(world.room.id)
+      end
+
+      # Everyone has answered this signs order and is out of roundtime. A
+      # follower that never answers (hung, or lost mid-order) must not strand us.
+      def waiting_for_signs?
+        return false unless grouped?
+        return false if @group.signs_complete? && !@group.roundtime?
+        return true if @clock.now - @signs_ordered_at < SIGNS_WAIT
+
+        Events.emit(:signs_wait_expired, seconds: SIGNS_WAIT)
+        false
       end
 
       # pre_hunt 7315-7341: at the hunting room, group open, everyone here,

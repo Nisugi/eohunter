@@ -1075,6 +1075,7 @@ if mode == 'tail'
   checked_at = Time.now
   encumbrance = EO::Engine::Rest::Encumbrance.new(seconds: profile['encumbrance_grace_seconds'])
   engine.on_tick do |w|
+    behaviors[:rest].answer_signs(-> { !behaviors[:maintain].wants_control?(w) })
     member.report(EO::Engine::Group.report(w, name: Char.name, rest_policy: behaviors[:rest_policy], counters: behaviors[:counters],
                                               sneaky: behaviors[:sneaky], looting: behaviors[:loot].looting?,
                                               rest_prep_done: behaviors[:rest].rest_prep_done,

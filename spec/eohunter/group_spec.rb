@@ -1197,7 +1197,12 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(orders_sent).to eq(%i[follow_now])
     expect(rest.phase).to eq(:signs) # the leader publishes signs_phase? from here
     expect(rest.signs_phase?).to be true
-    hub.report('Bob', report('Bob', rt: true)) # Bob is in roundtime
+    hub.report('Bob', report('Bob')) # idle, but that predates the order
+    rest.tick(world)
+    expect(orders_sent).to eq(%i[cast_signs])
+    expect(rest.phase).to eq(:signs)
+    hub.ack(:cast_signs, 'Bob', hunt_id: hub.hunt_id)
+    hub.report('Bob', report('Bob', rt: true))
     rest.tick(world)
     expect(rest.phase).to eq(:signs)
     hub.report('Bob', report('Bob'))
@@ -1247,6 +1252,9 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     world[:group_nouns] = ['Bob']
     rest.tick(world)
     expect(rest.phase).to eq(:signs)
+    rest.tick(world)
+    expect(orders_sent).to eq(%i[cast_signs])
+    clock.now += described_class::SIGNS_WAIT # Bob never answers
     rest.tick(world)
     expect(orders_sent).to eq(%i[hunting_scripts_start go2_hunting_room])
     expect(rest.phase).to eq(:hunting_scripts_own)
@@ -1596,5 +1604,35 @@ RSpec.describe EO::Engine::Group::Leader do
 
     expect(alive).to be true
     expect(calls).to be > 1
+  end
+end
+
+RSpec.describe EO::Engine::Behaviors::Orders, '#answer_signs' do
+  let(:member) { double('Member', leader_signs_wanted?: wanted, ack: true, rooms: {}) }
+  let(:wanted) { true }
+  let(:orders) { described_class.allocate.tap { |o| o.instance_variable_set(:@member, member) } }
+
+  it 'answers once an ordered follower has nothing due, and only once' do
+    orders.instance_variable_set(:@signs_ordered, true)
+    orders.answer_signs(-> { false })
+    expect(member).not_to have_received(:ack)
+    orders.answer_signs(-> { true })
+    orders.answer_signs(-> { true })
+    expect(member).to have_received(:ack).with(:cast_signs).once
+  end
+
+  it 'says nothing with no order to answer' do
+    orders.answer_signs(-> { true })
+    expect(member).not_to have_received(:ack)
+  end
+
+  context 'before the leader flag has arrived' do
+    let(:wanted) { false }
+
+    it 'does not read a held Maintain as finished' do
+      orders.instance_variable_set(:@signs_ordered, true)
+      orders.answer_signs(-> { true })
+      expect(member).not_to have_received(:ack)
+    end
   end
 end
