@@ -261,9 +261,10 @@ module EO::Engine
       REPEAT = /^repeatdelay(\d+)$/i
       # ES/EB/EC/ED"name": a spell, buff, cooldown or debuff by pattern,
       # negated with "!".
-      # EB also reads Lich's own spell timer, for what the game never lists
-      # (Briar Betrayer), and EB7 counts it up only with over 7 seconds left.
-      EFFECTS = /^(!?E(?:[SCD]|B(\d*)))"(.+)"$/i
+      # A number counts the effect as up only with more than that many
+      # seconds left (EB7, ES30). EB also reads Lich's own spell timer, for
+      # what the game never lists (Briar Betrayer).
+      EFFECTS = /^(!?E[SBCD])(\d*)"(.+)"$/i
       # empoweredN: skip when an Empowered buff of +N or more is up.
       EMPOWERED = /^(!?)empowered(\d+)$/i
       # thpN: skip while the target's HP percent is above N.
@@ -369,7 +370,7 @@ module EO::Engine
           return !last.nil? && (now - last) < m[1].to_i
         end
         if (m = mod.match(EFFECTS))
-          return effects_skip?(m[1].upcase.delete('0-9'), /#{m[3]}/i, me, name: m[3], seconds: m[2].to_s.empty? ? nil : m[2].to_i)
+          return effects_skip?(m[1].upcase, /#{m[3]}/i, me, name: m[3], seconds: m[2].empty? ? nil : m[2].to_i)
         end
 
         word_skip?(mod.downcase, line, world, target, state)
@@ -412,12 +413,14 @@ module EO::Engine
       # @param me [World::Me]
       # @return [Boolean] true to skip the line
       def effects_skip?(kind, pattern, me, name: nil, seconds: nil)
-        active = case kind.delete_prefix('!')
+        base = kind.delete_prefix('!')
+        active = case base
                  when 'ES' then me.spell_effect_active?(pattern)
                  when 'EB' then buff_up?(pattern, me, name, seconds)
                  when 'EC' then me.cooldown_active?(pattern)
                  when 'ED' then me.debuff_active?(pattern)
                  end
+        active &&= me.effect_seconds_left(base, pattern) > seconds if seconds && base != 'EB'
         kind.start_with?('!') ? active : !active
       end
 
