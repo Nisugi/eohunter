@@ -610,7 +610,10 @@ module EO::Engine
     # @bigshot valid_target?
     class Target < Base
       # Every line that answers a TARGET.
-      ANSWERS = /^You are now targeting|^You can't target|^You discern that you are the origin|^You are unable to discern the origin|^What were you referring to\?/
+      ANSWERS = /^Usage:\s+TARGET|^You do not have a target|^You are now targeting|^You can't target|^You discern that you are the origin|^You are unable to discern the origin|^What were you referring to\?/
+      # The game's answer when the creature has already left: a usage block
+      # ending in "You do not have a target." Nothing to wait out.
+      LEFT = /^Usage:\s+TARGET|^You do not have a target/
       # The answers that mean the creature cannot be targeted.
       REFUSED = /^You can't target|^You discern that you are the origin|^You are unable to discern the origin/
 
@@ -636,6 +639,7 @@ module EO::Engine
       def perform
         result = send_and_match("target ##{@target.id}", ANSWERS, timeout: @timeout)
         return result unless result.success?
+        return Result.new(status: :failed, reason: :target_left, line: result.line) if result.line =~ LEFT
         return Result.new(status: :failed, reason: :untargetable, line: result.line) if result.line =~ REFUSED
         return Result.new(status: :failed, reason: :referent_missing, line: result.line) if result.line =~ /What were you/
 
@@ -1169,6 +1173,10 @@ module EO::Engine
         @state.unarmed_tier = 1
 
         result = Actions::Target.new(world, target: @target).call
+        if result.failed? && result.reason == :target_left
+          @target = nil
+          return Actions::Result.new(status: :skipped, reason: :target_gone, line: result.line)
+        end
         if result.failed? && result.reason == :untargetable
           # Another group member can kill the creature while TARGET is in
           # flight. The game then answers "You can't target ...", but that

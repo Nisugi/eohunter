@@ -646,6 +646,26 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(hunter.tick(world).reason).to eq(:out_of_mana)
   end
 
+  it 'moves on at once when the creature left before the TARGET landed, learning nothing' do
+    left = EO::Engine::Actions::Result.new(status: :failed, reason: :target_left, line: 'Usage:  TARGET {player|creature|hazard}')
+    allow(EO::Engine::Actions::Target).to receive(:new).and_return(instance_double(EO::Engine::Actions::Target, call: left))
+    expect(engage.tick(world).reason).to eq(:target_gone)
+    expect(tp.untargetable_set).to be_empty
+    expect(engage.target).to be_nil
+  end
+
+  it 'reads the usage block and the no-target line as the answer to TARGET' do
+    allow(EO::Engine::Actions::Target).to receive(:new).and_call_original
+    ['Usage:  TARGET {player|creature|hazard}', 'You do not have a target.'].each do |line|
+      action = EO::Engine::Actions::Target.new(world, target: OpenStruct.new(id: '1', status: nil))
+      allow(action).to receive(:send_and_match) do |_cmd, answers, **|
+        expect(line).to match(answers)
+        EO::Engine::Actions::Result.new(status: :success, line: line)
+      end
+      expect(action.send(:perform).reason).to eq(:target_left)
+    end
+  end
+
   it 'learns an untargetable name from the probe and moves on' do
     refused = EO::Engine::Actions::Result.new(status: :failed, reason: :untargetable)
     allow(EO::Engine::Actions::Target).to receive(:new).and_return(instance_double(EO::Engine::Actions::Target, call: refused))
