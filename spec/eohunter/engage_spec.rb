@@ -91,6 +91,24 @@ RSpec.describe EO::Engine::Engage::Conditions do
     expect(blocked('barrage (buff30)')).to be_nil
     me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
     expect(blocked('barrage (buff30)')).to eq('buff30')
+    active_fx = true
+    %i[spell_effect_active? cooldown_active? debuff_active?].each { |m| me.define_singleton_method(m) { |_p| active_fx } }
+    left = 90.0
+    me.define_singleton_method(:effect_seconds_left) { |_k, _p| left }
+    %w[ES EC ED].each do |kind|
+      left = 90.0
+      expect(blocked(%(attack (#{kind}30"Thing")))).to be_nil
+      expect(blocked(%(attack (!#{kind}30"Thing")))).to eq(%(!#{kind}30"Thing"))
+      left = 5.0
+      expect(blocked(%(attack (#{kind}30"Thing")))).to eq(%(#{kind}30"Thing"))
+      expect(blocked(%(attack (!#{kind}30"Thing")))).to be_nil
+    end
+    active_fx = false
+    expect(blocked('attack (ES30"Thing")')).to eq('ES30"Thing"')
+    expect(blocked('attack (!ES30"Thing")')).to be_nil
+    me.define_singleton_method(:spell_effect_active?) { |_p| false }
+    me.define_singleton_method(:cooldown_active?) { |_p| false }
+    me.define_singleton_method(:debuff_active?) { |_n| false }
     me.define_singleton_method(:lich_spell_seconds_left) { |n| n == 'Briar Betrayer' ? @briar : nil }
     me.instance_variable_set(:@briar, nil)
     expect(blocked('script volley(!EB7"Briar Betrayer")')).to be_nil

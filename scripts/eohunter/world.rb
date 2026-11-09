@@ -713,7 +713,22 @@ module EO::Engine
       # @param name [String]
       # @return [Float] minutes
       def buff_time_left(name)
-        ::Lich::Gemstone::Effects::Buffs.time_left(name).to_f
+        fx = ::Lich::Gemstone::Effects
+        # #effect_active? reads both lists, so this has to as well.
+        [fx::Buffs.time_left(name).to_f, fx::Spells.time_left(name).to_f].max
+      rescue StandardError
+        0.0
+      end
+
+      # Seconds left on an effect, for the ES, EC and ED time forms.
+      #
+      # @param kind [String] ES, EC or ED
+      # @param pattern [Regexp, String]
+      # @return [Float] 0.0 when absent or unreadable
+      def effect_seconds_left(kind, pattern)
+        fx = ::Lich::Gemstone::Effects
+        list = { 'ES' => fx::Spells, 'EC' => fx::Cooldowns, 'ED' => fx::Debuffs }.fetch(kind)
+        list.time_left(pattern).to_f * 60
       rescue StandardError
         0.0
       end
