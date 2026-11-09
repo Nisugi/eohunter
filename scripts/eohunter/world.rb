@@ -843,6 +843,17 @@ module EO::Engine
         false
       end
 
+      # Lich's own timer for a spell by name, for effects the game never lists.
+      #
+      # @param name [String]
+      # @return [Float, nil] seconds left, nil when unknown or not active
+      def lich_spell_seconds_left(name)
+        spell = @w.spell[name]
+        spell&.active? ? spell.secsleft.to_f : nil
+      rescue StandardError
+        nil
+      end
+
       # @return [String, nil] the spell prepared and not yet cast
       def prepared_spell = @w.xmldata.prepared_spell
 

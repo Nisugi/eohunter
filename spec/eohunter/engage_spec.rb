@@ -91,6 +91,15 @@ RSpec.describe EO::Engine::Engage::Conditions do
     expect(blocked('barrage (buff30)')).to be_nil
     me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
     expect(blocked('barrage (buff30)')).to eq('buff30')
+    me.define_singleton_method(:lich_spell_seconds_left) { |n| n == 'Briar Betrayer' ? @briar : nil }
+    me.instance_variable_set(:@briar, nil)
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to be_nil
+    me.instance_variable_set(:@briar, 90.0)
+    expect(blocked('script volley(!EB"Briar Betrayer")')).to eq('!EB"Briar Betrayer"')
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to eq('!EB7"Briar Betrayer"')
+    me.instance_variable_set(:@briar, 5.0)
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to be_nil
+    expect(blocked('script volley(!EB"Briar Betrayer")')).to eq('!EB"Briar Betrayer"')
     expect(blocked('attack (EB"Enh. Dex")')).to be_nil
     expect(blocked('attack (!EB"Enh. Dex")')).to eq('!EB"Enh. Dex"')
   end

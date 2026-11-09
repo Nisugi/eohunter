@@ -248,7 +248,9 @@ module EO::Engine
       REPEAT = /^repeatdelay(\d+)$/i
       # ES/EB/EC/ED"name": a spell, buff, cooldown or debuff by pattern,
       # negated with "!".
-      EFFECTS = /^(!?E[SBCD])"(.+)"$/i
+      # EB also reads Lich's own spell timer, for what the game never lists
+      # (Briar Betrayer), and EB7 counts it up only with over 7 seconds left.
+      EFFECTS = /^(!?E(?:[SCD]|B(\d*)))"(.+)"$/i
       # empoweredN: skip when an Empowered buff of +N or more is up.
       EMPOWERED = /^(!?)empowered(\d+)$/i
       # thpN: skip while the target's HP percent is above N.
@@ -354,7 +356,7 @@ module EO::Engine
           return !last.nil? && (now - last) < m[1].to_i
         end
         if (m = mod.match(EFFECTS))
-          return effects_skip?(m[1].upcase, /#{m[2]}/i, me)
+          return effects_skip?(m[1].upcase.delete('0-9'), /#{m[3]}/i, me, name: m[3], seconds: m[2].to_s.empty? ? nil : m[2].to_i)
         end
 
         word_skip?(mod.downcase, line, world, target, state)
@@ -396,14 +398,25 @@ module EO::Engine
       # @param pattern [Regexp] the effect name
       # @param me [World::Me]
       # @return [Boolean] true to skip the line
-      def effects_skip?(kind, pattern, me)
+      def effects_skip?(kind, pattern, me, name: nil, seconds: nil)
         active = case kind.delete_prefix('!')
                  when 'ES' then me.spell_effect_active?(pattern)
-                 when 'EB' then me.effect_active?(pattern)
+                 when 'EB' then buff_up?(pattern, me, name, seconds)
                  when 'EC' then me.cooldown_active?(pattern)
                  when 'ED' then me.debuff_active?(pattern)
                  end
         kind.start_with?('!') ? active : !active
+      end
+
+      # The game's panels first, then Lich's timer for the same name; with
+      # +seconds+, up only while more than that remains.
+      def buff_up?(pattern, me, name, seconds)
+        from_game = me.effect_active?(pattern)
+        lich = !from_game && me.respond_to?(:lich_spell_seconds_left) ? me.lich_spell_seconds_left(name) : nil
+        return false unless from_game || lich
+        return true if seconds.nil?
+
+        (lich || me.buff_time_left(pattern) * 60) > seconds
       end
 
       # The target's CreatureInstance, when the world has a registry.
