@@ -87,6 +87,17 @@ RSpec.describe EO::Engine::Cleanse::Aid do
       expect(state.aid_seen).to have_key(['Dicate', :stun])
     end
 
+    it 'casts nothing once the game says the stun is over, though the status lags' do
+      state.aid_cleared['Dicate'] = t0
+      expect(pick('Monstr', t0 + 0.2)).to be_nil
+      expect(pick('Monstr', t0 + described_class::REPEAT[:stun]).victim).to eq('Dicate')
+    end
+
+    it 'reads the game line that ends a groupmate stun' do
+      line = '<a exist="-10017918" noun="Monstr">Monstr</a> shakes off <a exist="-10017918" noun="Monstr">his</a> stunned state.'
+      expect(described_class::CLEARED.match(line)[1]).to eq('Monstr')
+    end
+
     it 'does nothing without an affordable remedy' do
       know(108, affordable: false)
       expect(pick('Monstr', t0)).to be_nil
@@ -216,6 +227,14 @@ RSpec.describe EO::Engine::Actions::CleanseAid do
   it 'sings 1040 to the room' do
     _, spell = aid(1040)
     expect(spell.casts).to eq([[]])
+  end
+
+  it 'casts nothing once the game said the stun ended' do
+    spell = AidSpell.new(num: 108, known: true, affordable: true)
+    action = described_class.new(world, need: EO::Engine::Cleanse::Aid::Need.new(victim: 'Dicate', kind: :stun, spell: spell), cleared: -> { true })
+    allow(action).to receive(:settle_rt)
+    expect(action.call.reason).to eq(:recovered)
+    expect(spell.casts).to be_empty
   end
 
   it 'casts nothing once the groupmate is over it' do

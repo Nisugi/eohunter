@@ -83,7 +83,7 @@ module EO::Engine
       # cast for, and the need the last reason picked.
       #
       # @return [Hash{Array => Time}, Hash{Array => Time}, Aid::Need, nil]
-      attr_reader :aid_seen, :aid_cast_at
+      attr_reader :aid_seen, :aid_cast_at, :aid_cleared
       attr_accessor :aid_need
 
       def initialize
@@ -96,6 +96,7 @@ module EO::Engine
         @rally_member_at = nil
         @aid_seen = {}
         @aid_cast_at = {}
+        @aid_cleared = {}
         @aid_need = nil
       end
 
@@ -514,6 +515,11 @@ module EO::Engine
       MUCKLED = /webbed|sleeping|frozen/i
       # Needs the victim may answer itself first.
       SELF_CURABLE = %i[poison disease].freeze
+      # The game's word that a groupmate's stun is over, on the raw line
+      # (names and the pronoun are links). Lich's room status lags it by a
+      # moment: on 2026-11-10 a second 108 went out 0.2s after Monstr was
+      # clear, on a status that still read stunned.
+      CLEARED = %r{noun="(\w+)">\w+</a> shakes off .{0,120}?stunned state}
 
       # A need this character acts on: who, what, and the spell it casts.
       Need = Struct.new(:victim, :kind, :spell, keyword_init: true)
@@ -591,6 +597,14 @@ module EO::Engine
         (pool.uniq - [victim]).sort
       end
 
+      # The game said this groupmate's stun ended, within REPEAT[:stun].
+      #
+      # @return [Boolean]
+      def cleared?(state, victim, now = Time.now)
+        at = state.aid_cleared[victim]
+        !at.nil? && now - at < REPEAT[:stun]
+      end
+
       # The need this character should answer now, if any.
       #
       # @param world [World]
@@ -619,6 +633,7 @@ module EO::Engine
           key = [victim, kind]
           last = state.aid_cast_at[key]
           next if last && now - last < REPEAT[kind]
+          next if kind == :stun && cleared?(state, victim, now)
 
           rank = candidates(world, roster, name, mine, victim, kind).index(name)
           next if rank.nil?
@@ -1702,10 +1717,12 @@ module EO::Engine
 
       # @param world [World]
       # @param need [Cleanse::Aid::Need]
+      # @param cleared [#call] -> Boolean, the game said the stun ended
       # @param opts [Hash] Base's keywords (interrupt)
-      def initialize(world, need:, **opts)
+      def initialize(world, need:, cleared: -> { false }, **opts)
         super(world, **opts)
         @need = need
+        @cleared = cleared
       end
 
       # Dead, or the groupmate already over it, refuses the cast.
@@ -1740,6 +1757,7 @@ module EO::Engine
       def still_needed?
         re = { stun: Cleanse::Aid::STUN, muckled: Cleanse::Aid::MUCKLED }[@need.kind]
         return true if re.nil?
+        return false if @need.kind == :stun && @cleared.call
 
         p = Array(@world.room.players).find { |pl| pl.noun.to_s == @need.victim }
         !p.nil? && p.status.to_s =~ re ? true : false
@@ -1910,7 +1928,8 @@ module EO::Engine
         when :aid
           need = @state.aid_need
           @state.aid_cast_at[[need.victim, need.kind]] = Time.now
-          Actions::CleanseAid.new(world, need: need).call
+          state = @state
+          Actions::CleanseAid.new(world, need: need, cleared: -> { EO::Engine::Cleanse::Aid.cleared?(state, need.victim) }).call
         end
       end
 
@@ -1977,6 +1996,10 @@ module EO::Engine
         Events.on(:hive_trap) { |e| state.hive_trap_room = e.data[:room_id]; state.enqueue(event: e.data[:kind]) }
         Events.on(:itchy_curse) { state.enqueue(event: :itchy_curse) }
         Events.on(:entangled) { state.enqueue(event: :remove_web_bound) }
+        return unless @aid
+
+        Watch.on(EO::Engine::Cleanse::Aid::CLEARED, :aid_cleared) { |m| { victim: m[1] } }
+        Events.on(:aid_cleared) { |e| state.aid_cleared[e.data[:victim]] = Time.now }
       end
     end
   end
