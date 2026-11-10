@@ -213,9 +213,13 @@ module EO::Engine
       # by the item-limit line the looting itself raises, and by bounty
       # mode's rest within two seconds of the last kill.
       #
+      # The corpses stay unlooted: what took the tick was urgent (Survival,
+      # Cleanse, Flee), and once it is done the script runs again for them.
+      # Taking them as done lost the room's loot to every interruption.
+      #
       # @param _world [World]
       # @return [void]
-      def preempted!(_world) = stop_script!
+      def preempted!(_world) = stop_script!(done: false)
 
       # The engine stopping: same thing, no world to hand over.
       #
@@ -413,17 +417,19 @@ module EO::Engine
 
       # looting_watch: wait for the script; a pause with a box in
       # hand means it could not store the box, which is a forced rest.
-      # Kill a running loot script and take its corpses as done, the way
-      # watch_script does when the script ends on its own.
+      # Kill a running loot script. With +done+ its corpses are taken as
+      # looted, the way watch_script does when the script ends on its own;
+      # without, they are left for the next run.
       #
+      # @param done [Boolean]
       # @return [void]
-      def stop_script!
+      def stop_script!(done: true)
         return unless @script_running
 
         name = @policy.script.to_s.split(/\s+/).first
         @scripts.kill(name) if name && !name.empty?
         @script_running = false
-        @looted.concat(@script_corpses)
+        @looted.concat(@script_corpses) if done
         @script_corpses = []
       end
 

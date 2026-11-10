@@ -342,7 +342,6 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     it 'is killed when another behavior takes the tick' do
       loot.preempted!(world)
       expect(scripts.killed).to eq(['eloot'])
-      expect(loot.wants_control?(world)).to be false
     end
 
     it 'is killed when the engine stops' do
@@ -350,11 +349,16 @@ RSpec.describe EO::Engine::Behaviors::Loot do
       expect(scripts.killed).to eq(['eloot'])
     end
 
-    it 'takes its corpses as done, the way a finished script does' do
+    it 'leaves its corpses for the next run, so an interruption costs no loot' do
       loot.preempted!(world)
-      # the corpse it was started for is not looted a second time
+      expect(loot.wants_control?(world)).to be true
+      expect(loot.tick(world).reason).to eq(:script_started)
+      expect(scripts.started.length).to eq(2)
+    end
+
+    it 'takes its corpses as done when the engine stops' do
+      loot.cancel!
       expect(loot.wants_control?(world)).to be false
-      expect(scripts.started.length).to eq(1)
     end
 
     it 'kills nothing when no script is running' do
