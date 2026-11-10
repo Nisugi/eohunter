@@ -35,7 +35,7 @@ module EO::Engine
                rest_service_failed town_rest_complete final_loot_done overkill loot_script_started loot_stuck],
       group: %i[order followers_ready waiting_for_followers follower_lost loot_assigned hunt_over hunt_ended
                 coordination_return_required],
-      recovery: %i[fleeing cleansing cleansed cleanse_stuck died deader disarmed rooted out_of_mana
+      recovery: %i[fleeing cleansing cleansed cleanse_stuck aid_seen aid_cast died deader disarmed rooted out_of_mana
                    too_injured_for_wands no_fresh_wands maintain_stuck loadout_stuck buff_policy_status
                    preparation_failed],
       bounty: %i[bounty_hunt bounty_stage bounty_waiting bounty_removing bounty_script bounty_error
