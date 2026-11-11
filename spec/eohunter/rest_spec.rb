@@ -584,6 +584,19 @@ RSpec.describe EO::Engine::Behaviors::Rest do
         expect(seen).to eq([{ reason: :hostiles_here, count: 1 }])
       end
 
+      it 'stops the wounded loot and leaves when a creature here comes round' do
+        seen = []
+        EO::Engine::Events.on(:final_loot_skipped) { |e| seen << e.data }
+        expect(wounded_rest('stunned')).to eq(:final_loot)
+        expect(with_loot.tick(world)).to be_success
+        world.room.targets.first.status = ''
+        with_loot.tick(world)
+        expect(with_loot.phase).to eq(:leave)
+        expect(looter.ticks).to eq(1)
+        expect(looter.cancelled).to be true
+        expect(seen).to eq([{ reason: :hostiles_arrived, count: 1 }])
+      end
+
       it 'treats a rooted creature as able to fight: it can still attack and cast' do
         expect(wounded_rest('rooted')).to eq(:leave)
       end
