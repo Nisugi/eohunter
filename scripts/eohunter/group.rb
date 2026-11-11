@@ -45,6 +45,8 @@ module EO::Engine
     #   @return [Boolean] the group runs a deader for a fallen member
     # @!attribute looter
     #   @return [String, nil] the named looter, matched case-insensitively
+    # @!attribute final_looter
+    #   @return [String, nil] who does the final loot; nil picks as looter does
     # @!attribute quiet_followers
     #   @return [Boolean] followers keep their output quiet
     # @!attribute never_loot
@@ -54,9 +56,9 @@ module EO::Engine
     # @!attribute fried_trigger
     #   @return [Array<String>] "any", "all", or the names whose frying rests the group
     Policy = Struct.new(:independent_travel, :independent_return, :group_deader, :looter, :quiet_followers,
-                        :never_loot, :random_loot, :fried_trigger, keyword_init: true) do
+                        :never_loot, :random_loot, :fried_trigger, :final_looter, keyword_init: true) do
       def initialize(independent_travel: false, independent_return: false, group_deader: false, looter: nil,
-                     quiet_followers: true, never_loot: [], random_loot: false, fried_trigger: ['any']) = super
+                     quiet_followers: true, never_loot: [], random_loot: false, fried_trigger: ['any'], final_looter: nil) = super
 
       # The never_loot setting as strings, whatever the profile gave.
       #
@@ -1249,6 +1251,20 @@ module EO::Engine
         end
         eligible = names - never
         @looter = eligible.include?(@name) ? @name : eligible.sample
+      end
+
+      # The final loot's looter: final_looter when online and not on
+      # never_loot, else the same choice as a corpse (looter).
+      #
+      # @param me_left [Integer] the leader's own free encumbrance
+      # @return [String, nil] the chosen looter's name, also published from here on
+      def final_looter(me_left: 0)
+        named = @policy.final_looter.to_s
+        unless solo? || named.empty?
+          found = (online + [@name]).find { |n| n.to_s.casecmp(named).zero? }
+          return @looter = found if found && !@policy.never_loot_list.include?(found)
+        end
+        looter(me_left: me_left)
       end
 
       # The unacknowledged shutdown: hunt_over to everyone, the Hub marked

@@ -434,6 +434,7 @@ explicit loadout failure, not permission to attack with a different weapon.
 | `independent_return` | bool | false | Group: followers walk home on their own |
 | `group_deader` | bool | false | Group: the leader stops for a dead member |
 | `ma_looter` | string | none | Group: who loots |
+| `final_looter` | string | none | Group: who does the final loot (`final_loot`); blank, offline or on `never_loot` picks as for a corpse |
 | `never_loot` | split_xx | none | Group: members who never loot |
 | `random_loot` | bool | false | Group: a random looter each fight |
 | `quiet_followers` | bool | true | Group: followers do not print the leader's orders |

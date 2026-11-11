@@ -262,6 +262,19 @@ RSpec.describe EO::Engine::Group::Leader do
       policy.never_loot = %w[Bob Ann]
       expect(leader.looter(me_left: 10)).to eq('Lead')
     end
+
+    it 'gives the final loot to final_looter when in the group, else picks as for a corpse' do
+      policy.final_looter = 'bob'
+      expect(leader.final_looter).to eq('Bob')
+      policy.never_loot = ['Bob']
+      expect(leader.final_looter).to eq('Lead')
+      policy.never_loot = []
+      policy.final_looter = 'Zed'
+      policy.looter = 'Ann'
+      expect(leader.final_looter).to eq('Ann')
+      policy.final_looter = nil
+      expect(leader.final_looter).to eq('Ann')
+    end
   end
 
   it 'publishes the leader state and orders every follower' do

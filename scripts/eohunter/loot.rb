@@ -383,11 +383,32 @@ module EO::Engine
         return nil unless @reason == :floor
 
         @reason = nil
+        return hand_off_floor(world) if handed_off_floor?(world)
+
         if @policy.script
           start_script(world)
         else
           loot_room(world)
         end
+      end
+
+      # The leader's final loot goes to the group's final looter
+      # (Leader#final_looter); a follower assigned the room loots it.
+      def handed_off_floor?(world)
+        return false if @follower || @group.nil? || @group.solo?
+
+        @floor_looter = @group.final_looter(me_left: @rest_policy.encumbered_pct - world.me.encumbrance_pct.to_i)
+        @floor_looter != @group.name
+      end
+
+      # The order out, the floor as it stands marked done here; the group
+      # holds the room until the looter reports done (looting_done?).
+      def hand_off_floor(world)
+        @floor_looted_signature = floor_signature(world)
+        @group.order(:prep_rest, room: world.room.id)
+        @group.order(:loot, @floor_looter, room: world.room.id)
+        Events.emit(:loot_assigned, looter: @floor_looter, room: world.room.id, final: true)
+        Actions::Result.new(status: :success, reason: :loot_assigned)
       end
 
       def loot_room(world)

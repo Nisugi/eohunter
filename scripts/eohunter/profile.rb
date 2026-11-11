@@ -73,7 +73,7 @@ module EO::Engine
       'group_aid' => [:bool, true],
       # MA Grouping
       'independent_travel' => [:bool, false], 'independent_return' => [:bool, false], 'group_deader' => [:bool, false],
-      'ma_looter' => [:string, nil], 'never_loot' => [:split_xx, []], 'random_loot' => [:bool, false], 'quiet_followers' => [:bool, true],
+      'ma_looter' => [:string, nil], 'final_looter' => [:string, nil], 'never_loot' => [:split_xx, []], 'random_loot' => [:bool, false], 'quiet_followers' => [:bool, true],
       'group_fried_trigger' => [:split, ['any']], 'group_strict_movement' => [:bool, false]
     }.freeze
 
@@ -301,7 +301,8 @@ module EO::Engine
     def group_policy
       Group::Policy.new(independent_travel: self['independent_travel'], independent_return: self['independent_return'],
                         group_deader: self['group_deader'], looter: self['ma_looter'], quiet_followers: self['quiet_followers'],
-                        never_loot: self['never_loot'].flatten, random_loot: self['random_loot'], fried_trigger: self['group_fried_trigger'])
+                        never_loot: self['never_loot'].flatten, random_loot: self['random_loot'], fried_trigger: self['group_fried_trigger'],
+                        final_looter: self['final_looter'])
     end
 
     # The Engage Policy: hunting_commands as routine 'a' and
