@@ -15,12 +15,13 @@ module EO
       # what the page binds is handled, and a handler the page expects and
       # this does not supply fails at the first click, as ArgumentError.
       HANDLERS = %i[
-        rename load open_named set_default copy_legacy import_row new validate save revert select_page
+        rename load set_default copy_legacy new validate save revert select_page
         search change list_set_all test_condition
         set_active request_delete confirm_delete cancel_delete
         toggle_map sheet find_room go_to_room assign_role map_room map_click map_wheel map_zoom map_reset_zoom room_geometry
         toggle_creatures hunt_creature hunt_all toggle_boons toggle_boon
-        toggle_aiming hunt_filter toggle_creature_search find_creature
+        hunt_filter toggle_creature_search find_creature
+        recovery_set import_ecleanse toggle_fold
       ].freeze
 
       # What Test now said about each condition, by setting key.
@@ -56,10 +57,8 @@ module EO
         case name
         when :rename then apply(editor.on_rename(value))
         when :load then open_hunt(value)
-        when :open_named then open_hunt(args[0])
         when :set_default then apply(editor.on_set_active(value == true ? args[0] : nil))
         when :copy_legacy then import(value)
-        when :import_row then import(Page.row_name('b', payload[:row], editor.legacy_profiles))
         when :new then guarded('Start a new hunt') { editor.on_new }
         when :validate then apply(editor.on_validate)
         when :save then apply(editor.on_save)
@@ -75,7 +74,9 @@ module EO
         when :cancel_delete then apply(editor.on_cancel_delete)
         when :toggle_map then apply(editor.on_toggle_map)
         when :toggle_creatures then apply(editor.on_toggle_creatures)
-        when :toggle_aiming then apply(editor.on_toggle_aiming)
+        when :toggle_fold then apply(editor.on_toggle_fold(args[0]))
+        when :recovery_set then apply(editor.on_recovery_set(args[0], value))
+        when :import_ecleanse then apply(editor.on_import_ecleanse)
         when :hunt_creature then apply(editor.on_hunt_creature(args[0], value == true))
         when :hunt_all then apply(editor.on_hunt_all(args[0]))
         when :toggle_boons then apply(editor.on_toggle_boons(args[0]))

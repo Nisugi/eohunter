@@ -21,9 +21,9 @@ module EO
       # They label the sidebar, so they can say what the page is for.
       TITLES = {
         'area' => 'Where to hunt', 'creatures' => 'What to hunt', 'hunting' => 'Hunting behavior',
-        'monitoring' => 'When to return', 'rest' => 'Town rest', 'field' => 'Field rest & getting home',
-        'recovery' => 'Recovery & emergencies', 'combat' => 'Combat routines', 'unarmed' => 'Unarmed & MSTRIKE',
-        'equipment' => 'Equipment', 'buffs' => 'Buffs', 'preparations' => 'Preparations & scripts',
+        'rest' => 'Rest',
+        'recovery' => 'Recovery & emergencies', 'combat' => 'Combat',
+        'equipment' => 'Gear',
         'team' => 'Multi-account team'
       }.freeze
 
@@ -37,11 +37,10 @@ module EO
       # settings that only matter with other people.
       SECTIONS = [
         ['Profiles', %w[manage]],
-        ['The hunt', %w[area creatures hunting monitoring]],
-        ['Rest & recovery', %w[rest field recovery]],
-        ['Combat & equipment', %w[combat unarmed equipment buffs preparations]],
-        ['Hunting with others', %w[team]],
-        ['Finish', %w[review]]
+        ['The hunt', %w[area creatures hunting]],
+        ['Rest & recovery', %w[rest recovery]],
+        ['Combat & equipment', %w[combat equipment]],
+        ['Hunting with others', %w[team]]
       ].freeze
 
       # Pages that are not settings pages, with their titles and the section
@@ -50,7 +49,7 @@ module EO
       # comparison page yet, and a sidebar item leading nowhere is worse than
       # one that is missing.
       EXTRA_TITLES = {
-        'manage' => 'Manage profiles', 'review' => 'Review & save'
+        'manage' => 'Hunts'
       }.freeze
 
       # The sidebar's items, in section order: id, label, section.
@@ -125,6 +124,13 @@ module EO
       def fields_for(page)
         fields.select { |field| field['page'] == page }
       end
+
+      # Counts each time the whole draft is replaced. Lich keeps what a viewer
+      # sees in a box by the box's identity and ignores a later redraw's value,
+      # so the page's outer key carries this: a replaced draft gets new boxes,
+      # filled from the draft, and not the last hunt's values or blanks.
+      # @return [Integer]
+      def draft_serial = @draft_serial || 0
 
       # @return [Hash] this draft's settings, never nil
       def settings = @draft['settings'] ||= {}
@@ -267,6 +273,7 @@ module EO
           @revision = nil
           @draft = { 'schema_version' => 1, 'settings' => {} }
           @baseline = deep_copy(@draft)
+          @draft_serial = draft_serial + 1
         end
         note("Deleted #{name}. A backup was kept.")
       rescue StandardError => error
@@ -286,6 +293,7 @@ module EO
         @map = nil
         @sheet = nil
         @map_frame = nil
+        @draft_serial = draft_serial + 1
         note('Started a new hunt. Name it, then save.')
       end
 
@@ -315,6 +323,7 @@ module EO
         data['settings'] = kept.to_h
         @draft = data
         @baseline = { 'schema_version' => 1, 'settings' => {} }
+        @draft_serial = draft_serial + 1
         @validation = nil
         @map = nil
         unused = dropped.count { |(key, _)| !known.include?(key) }
@@ -341,6 +350,7 @@ module EO
         @map = nil
         @sheet = nil
         @map_frame = nil
+        @draft_serial = draft_serial + 1
         note("Loaded #{name}.")
       rescue StandardError => error
         # The list is rebuilt from disk before the message, so a hunt that has
@@ -633,9 +643,53 @@ module EO
       def on_revert
         @draft = deep_copy(@baseline)
         @name = @loaded_name
+        @draft_serial = draft_serial + 1
         @validation = nil
         @map = nil
         note('Reverted to the last saved version.')
+      end
+
+      # @param key [String] a Cleanse preference
+      # @return [Object, nil] what this hunt says about it
+      def recovery_value(key) = recovery_settings[key]
+
+      # Set one Cleanse preference. Off is simply absent, and ecleanse's window
+      # allows one stunman choice, so ticking one clears the others.
+      # @param key [String] a Cleanse preference
+      # @param value [Boolean, String]
+      # @return [Boolean] whether to re-render
+      def on_recovery_set(key, value)
+        wanted = recovery_settings.dup
+        Schema::RECOVERY_EXCLUSIVE.each { |other| wanted.delete(other) } if value == true && Schema::RECOVERY_EXCLUSIVE.include?(key)
+        if value == true || (value.is_a?(String) && !value.empty?)
+          wanted[key] = value
+        else
+          wanted.delete(key)
+        end
+        wanted.empty? ? settings.delete('recovery') : settings['recovery'] = wanted
+        @validation = nil
+        # Lich keeps a tick by its identity, so clearing a stunman choice from
+        # here needs new boxes; typing in the safe room must keep its box.
+        @draft_serial = draft_serial + 1 if value == true && Schema::RECOVERY_EXCLUSIVE.include?(key)
+        true
+      end
+
+      # @return [Boolean] whether standalone ecleanse has anything to import
+      def ecleanse_to_import?
+        !ecleanse_settings.empty?
+      end
+
+      # Copy standalone ecleanse's preferences into this draft, replacing the
+      # draft's. Nothing is written until the hunt is saved.
+      # @return [Boolean] whether to re-render
+      def on_import_ecleanse
+        found = ecleanse_settings
+        return note('ecleanse has nothing set to import.', error: true) if found.empty?
+
+        settings['recovery'] = found
+        @validation = nil
+        @draft_serial = draft_serial + 1
+        note("Imported #{found.size} ecleanse setting#{'s' if found.size != 1}. Save to keep them.")
       end
 
       # What each room role is called.
@@ -869,15 +923,15 @@ module EO
       #   adjectives and effect
       def boon_abilities = Array(@boot[:boon_abilities] || @boot['boon_abilities'])
 
-      # Whether the aiming orders are shown on Combat routines. Off until
-      # asked for, like the map.
-      # @return [Boolean]
-      def aiming_open? = @aiming_open == true
+      # @param name [String] a folded group's heading
+      # @return [Boolean] whether that group is open
+      def fold_open?(name) = (@open_folds ||= {})[name] == true
 
-      # Show or hide them.
+      # Open or close a folded group.
+      # @param name [String] its heading
       # @return [Boolean] whether to re-render
-      def on_toggle_aiming
-        @aiming_open = !aiming_open?
+      def on_toggle_fold(name)
+        (@open_folds ||= {})[name] = !fold_open?(name)
         true
       end
 
@@ -1208,6 +1262,18 @@ module EO
       end
 
       private
+
+      def recovery_settings
+        value = settings['recovery']
+        value.is_a?(Hash) ? value.transform_keys(&:to_s) : {}
+      end
+
+      def ecleanse_settings
+        Hash(@app.call('action' => 'ecleanse_settings'))
+      rescue StandardError => error
+        note("Could not read ecleanse: #{error.message}", error: true)
+        {}
+      end
 
       def refresh_boot
         @boot = @app.call('action' => 'bootstrap')

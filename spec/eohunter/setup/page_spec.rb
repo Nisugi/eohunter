@@ -106,7 +106,7 @@ RSpec.describe EO::HunterSetup::Page do
   let(:app) do
     EO::HunterSetup::Runtime.app(
       data_dir: @directory, game: 'GSIV', character: 'Example',
-      templates: [], rooms: [], uid_resolver: ->(_uid) { [] },
+      char_settings: {}, templates: [], rooms: [], uid_resolver: ->(_uid) { [] },
       inventory: [{ noun: 'falchion', name: 'a steel falchion', types: nil }],
       armaments: { weapons: %w[falchion], shields: [] }
     )
@@ -129,9 +129,8 @@ RSpec.describe EO::HunterSetup::Page do
 
   it 'draws the full editor with a tab for every page and a control for every setting' do
     # The boon settings show only when relevant; a value makes them so.
-    # The aiming orders show when asked for.
     editor.on_change('boons_flee', 'regen')
-    editor.on_toggle_aiming
+    described_class::GROUPS.values.flatten(1).each { |(heading, _keys, fold)| editor.on_toggle_fold(heading) if fold == :fold }
     builder = render
     tabs = nodes(builder, :tabs).first
     expect(tabs.props[:names]).to eq(described_class::PAGES.map { |item| item[:label] })
@@ -145,6 +144,8 @@ RSpec.describe EO::HunterSetup::Page do
       render.all.map { |node| node.props[:key]&.to_s&.sub(/-\h{8}\z/, '') }.compact
     end
     editor.fields.each do |field|
+      next if described_class::HIDDEN.include?(field['key'])
+
       expect(keyed).to include(field['key']), "no control for #{field['key']}"
     end
   end
@@ -154,6 +155,136 @@ RSpec.describe EO::HunterSetup::Page do
     expect(bound).not_to be_empty
     bound.each do |handler|
       expect { handler.call(FakeEvent.new({ value: '', row: 'none' })) }.not_to raise_error
+    end
+  end
+
+  it 'keeps a folded group behind a button that says how much of it is set' do
+    editor.on_show_page('rest')
+    editor.on_change('field_rest_room_id', '228')
+    button = nodes(render, :button).find { |node| node.props[:key] == 'fold' }
+    expect(button.props[:label]).to eq('Show (1 set)')
+    expect(render.all.map { |node| node.props[:key].to_s }).not_to include('field_rest_for')
+    button.on[:activate].call(FakeEvent.new({}))
+    expect(render.all.map { |node| node.props[:key].to_s }).to include('field_rest_for')
+    expect(nodes(render, :button).find { |node| node.props[:key] == 'fold' }.props[:label]).to eq('Hide')
+  end
+
+  describe 'tooltips' do
+    let(:fields) { editor.fields.to_h { |field| [field['key'], field] } }
+
+    it 'say what a setting does and its default, and nothing about the engine' do
+      tip = EO::HunterSetup::Form.tooltip(editor, fields['fried'])
+      expect(tip).to eq('Go rest when your mind is at least this full. Above 100: never. Default: 100.')
+      editor.fields.each do |field|
+        # Only a worked example, at the end, may run over several lines.
+        text = EO::HunterSetup::Form.tooltip(editor, field).split("\n\nFor example:\n").first
+        expect(text).not_to match(/native|Engine default|Set in this hunt|
+/), "#{field['key']}: #{text}"
+        expect(text).not_to end_with(field['key']) unless field['key'] == text
+      end
+    end
+  end
+
+  it 'shows the loadout examples in their tooltips, line by line, and the engine accepts them' do
+    field = editor.fields.find { |entry| entry['key'] == 'hunting_loadout_rules' }
+    indent = EO::HunterSetup::Schema::NBSP * 2
+    expect(EO::HunterSetup::Form.tooltip(editor, field)).to end_with(
+      ["For example:", '- target: triton protector', "#{indent}set: slasher", '- type: undead', "#{indent}set: blunt",
+       '- target: wight', "#{indent}type: undead", "#{indent}set: blessed"].join("\n")
+    )
+    rules = YAML.safe_load(EO::HunterSetup::Schema::LOADOUT_RULES_EXAMPLE.join("\n"))
+    sets = YAML.safe_load(EO::HunterSetup::Schema::LOADOUT_SETS_EXAMPLE.join("\n"))
+    profile = EO::Engine::Profile.new({ 'hunting_right_hand' => 'ready:weapon', 'hunting_loadout_rules' => rules,
+                                        'hunting_loadout_sets' => sets })
+    expect(profile.loadout_selection).to be_managed
+  end
+
+  it 'offers turbo as a choice, showing a saved true as All' do
+    skip 'this engine has no turbo' unless editor.fields.any? { |field| field['key'] == 'turbo' }
+
+    editor.on_show_page('hunting')
+    editor.on_change('turbo', 'true')
+    turbo = nodes(render, :select).find { |node| node.props[:key] == 'turbo' }
+    expect(turbo.props[:options].map { |option| option[:value] }).to include('off', 'stance', 'all')
+    expect(turbo.props[:value]).to eq('all')
+  end
+
+  describe 'the Cleanse settings' do
+    let(:ecleanse) { File.join(@directory, 'GSIV', 'Example', 'ecleanse.yaml') }
+
+    before { editor.on_show_page('recovery') }
+
+    it 'draws a control for every preference and no YAML box' do
+      keys = render.all.map { |node| node.props[:key].to_s }
+      # stand_stance is the hunt's own, on the Hunting page.
+      expect(keys).to include(*(EO::Engine::Cleanse::KEYS - [:stand_stance]).map(&:to_s))
+      expect(render.all.map(&:type)).not_to include(:textarea)
+    end
+
+    it 'keeps what is ticked in the hunt, and off is absent' do
+      session.call(:recovery_set, double(payload: { value: true }), 'cleanse_poison')
+      expect(editor.settings['recovery']).to eq('cleanse_poison' => true)
+      expect(EO::Engine::Profile.new({ 'recovery' => editor.settings['recovery'] }).recovery_policy.cleanse_poison).to be(true)
+      session.call(:recovery_set, double(payload: { value: false }), 'cleanse_poison')
+      expect(editor.settings).not_to have_key('recovery')
+    end
+
+    it 'allows one stunman choice, as ecleanse does' do
+      editor.on_recovery_set('use_berserk_stunned', true)
+      editor.on_recovery_set('use_stance1', true)
+      serial = editor.draft_serial
+      editor.on_recovery_set('use_hide', true)
+      expect(editor.settings['recovery']).to eq('use_berserk_stunned' => true, 'use_hide' => true)
+      expect(editor.draft_serial).to eq(serial + 1)
+    end
+
+    it 'offers the import only when ecleanse has something, and it replaces the draft unsaved' do
+      expect(render.all.map { |node| node.props[:key].to_s }).not_to include('import-ecleanse')
+      FileUtils.mkdir_p(File.dirname(ecleanse))
+      File.write(ecleanse, ":cleanse_poison: true\n:use_619: false\n:safe_room: '228'\n:stop_scripts: bigshot\n:troubadours_rally: true\n:stand_stance: offensive\n")
+      before = File.read(ecleanse)
+      expect(render.all.map { |node| node.props[:key].to_s }).to include('import-ecleanse')
+      editor.on_recovery_set('use_hide', true)
+      serial = editor.draft_serial
+      session.call(:import_ecleanse, double(payload: {}))
+      expect(editor.settings['recovery']).to eq('cleanse_poison' => true, 'safe_room' => '228')
+      expect(editor.draft_serial).to eq(serial + 1)
+      expect(editor).to be_dirty
+      expect(File.read(ecleanse)).to eq(before)
+    end
+
+    it 'falls back to the toggles ecleanse keeps in CharSettings without a file' do
+      expect(EO::HunterSetup::Runtime.ecleanse_settings(ecleanse, char_settings: { 'avoid_webs' => true, 'other' => true })).to eq('avoid_webs' => true)
+    end
+  end
+
+  describe 'replacing the whole draft' do
+    def serial_after
+      before = editor.draft_serial
+      yield
+      editor.draft_serial - before
+    end
+
+    it 'gives the page new boxes when a hunt is opened, started or reverted' do
+      editor.on_change('flee_count', '3')
+      editor.on_rename('forest')
+      editor.on_save
+      expect(serial_after { editor.on_load('forest') }).to eq(1)
+      editor.on_change('flee_count', '4')
+      expect(serial_after { editor.on_revert }).to eq(1)
+      expect(serial_after { editor.on_new }).to eq(1)
+    end
+
+    it 'keeps the boxes, and what is typed in them, through an ordinary edit or a failed open' do
+      expect(serial_after { editor.on_change('flee_count', '3') }).to eq(0)
+      expect(serial_after { editor.on_load('no_such_hunt') }).to eq(0)
+    end
+
+    it 'puts the count in the key of the box everything is drawn in' do
+      recorder = instance_double('ui')
+      allow(recorder).to receive(:stack) { |**props| expect(props[:key]).to eq("root-#{editor.draft_serial}") }
+      described_class.render(recorder, editor, session)
+      expect(recorder).to have_received(:stack)
     end
   end
 
@@ -174,7 +305,7 @@ RSpec.describe EO::HunterSetup::Page do
 
     let(:app) do
       EO::HunterSetup::Runtime.app(
-        data_dir: @directory, game: 'GSIV', character: 'Example', level: 20,
+        data_dir: @directory, game: 'GSIV', character: 'Example', char_settings: {}, level: 20,
         templates: [template_class.new(name: 'kobold', level: 1, family: 'kobold', type: 'biped', areas: [{ name: 'Kobold Warren', uids: [1] }]),
                     template_class.new(name: 'rolton', level: 18, family: 'rolton', type: 'quadruped', areas: [{ name: 'Upper Trollfang', uids: [2] }]),
                     template_class.new(name: 'troll', level: 22, family: 'troll', type: 'biped',
@@ -246,7 +377,7 @@ RSpec.describe EO::HunterSetup::Page do
     # the browser has no typed draft to put back over what the map set. A
     # box the map never touches keeps one identity.
     expect(after.props[:key]).not_to eq(box.props[:key])
-    editor.on_show_page('preparations')
+    editor.on_show_page('equipment')
     expect(nodes(render, :text_input).find { |node| node.props[:key] == 'hunting_scripts' }).not_to be_nil
   end
 
@@ -256,7 +387,7 @@ RSpec.describe EO::HunterSetup::Page do
     editor.on_validate
     expect(editor.warnings.map { |entry| entry['key'] || entry[:key] }).to include('hunting_stance')
     builder = render
-    row = nodes(builder, :stack).find { |node| node.props[:key] == 'f-hunting_stance' }
+    row = nodes(builder, :stack).find { |node| node.props[:key] == 'line-hunting_stance' }
     expect(row.children.map(&:type)).to include(:text)
     expect(row.children.last.props[:tone]).to eq(:danger)
   end
@@ -358,7 +489,7 @@ RSpec.describe EO::HunterSetup::Page do
     expect(EO::HunterSetup::Schema::BOON_EFFECTS.keys).to match_array(EO::Engine::Targets::BOON_ADJECTIVES.keys)
   end
 
-  it 'lists saved hunts one a line: the name opens it, Default ticks it, Delete asks about that one' do
+  it 'lists saved hunts one a line, the open one in bold: Default ticks it, Delete asks about that one' do
     editor.on_rename('forest')
     editor.on_save
     editor.on_new
@@ -374,8 +505,12 @@ RSpec.describe EO::HunterSetup::Page do
     expect(nodes(builder, :table).map { |node| node.cid }).not_to include(a_string_including('saved'))
     expect(nodes(builder, :group).map { |node| node.props[:key] }).not_to include('confirm-delete')
     expect(nodes(builder, :select).map { |node| node.props[:key] }).not_to include('active')
-    expect(%w[forest plains].map { |name| within[builder, name, :button, 'open'].props[:label] }).to eq(%w[forest plains])
-    within[builder, 'forest', :button, 'open'].on[:activate].call(FakeEvent.new({}))
+    expect(%w[forest plains].map { |name| within[builder, name, :text, 'name'].props[:content] }).to eq(%w[forest plains])
+    editor.on_load('forest')
+    builder = render
+    expect(within[builder, 'forest', :text, 'name'].props[:emphasis]).to eq(:strong)
+    expect(within[builder, 'plains', :text, 'name'].props[:emphasis]).to eq(:normal)
+    expect(nodes(builder, :table).map { |node| node.props[:key] }).not_to include('list')
     expect(editor.name).to eq('forest')
     expect(editor.revision).to be_a(String)
     # Delete on the other line asks about that one, not the open one: the X
@@ -426,68 +561,78 @@ RSpec.describe EO::HunterSetup::Page do
     described_class::GROUPS.each do |page, groups|
       fields = editor.fields_for(page)
       keys = fields.map { |field| field['key'] }
+      # A setting this engine lacks may be named; the schema still has to
+      # place it on this page, for the engine that has it.
       groups.each do |(heading, members)|
-        expect(keys).to include(*members), "#{page}: #{heading} names a setting the page does not have"
+        allowed = (EO::HunterSetup::Schema::PAGES[page] || []) + keys
+        named = members.flatten.reject { |key| key.match?(/\Ahunting_commands/) }
+        expect(allowed).to include(*named), "#{page}: #{heading} names a setting the page does not have"
       end
-      grouped = described_class.grouped(fields).flat_map { |(_heading, members)| members.map { |field| field['key'] } }
-      expect(grouped).to match_array(keys)
+      grouped = described_class.grouped(fields).flat_map { |(_heading, members)| members.flatten.map { |field| field['key'] } }
+      expect(grouped).to match_array(keys - described_class::HIDDEN)
     end
   end
 
-  it 'pairs short controls two to a row and leaves tall ones alone' do
-    editor.on_show_page('hunting')
-    builder = render
-    pair = nodes(builder, :columns).find { |node| node.props[:key] == 'r-hunting_stance' }
-    expect(pair.children.map { |child| child.props[:key] }).to eq(%w[f-hunting_stance f-wander_stance])
-    expect(pair.children.map(&:slot)).to eq(%w[0 1])
-    list = described_class::PAGES.lazy.map do |item|
+  it 'keeps every cell of every page inside its grid, as Lich requires' do
+    described_class::GROUPS.values.flatten(1).each { |(heading, _keys, fold)| editor.on_toggle_fold(heading) if fold == :fold }
+    described_class::PAGES.each do |item|
       editor.on_show_page(item[:id])
-      nodes(render, :stack).find { |node| node.props[:key] == 'f-hunting_commands' }
-    end.find(&:itself)
-    expect(list.slot).to be_nil
+      nodes(render, :grid).each do |grid|
+        grid.children.each do |child|
+          at = child.props[:placement] || {}
+          next unless at[:column]
+
+          expect(at[:column] + (at[:span] || 1) - 1).to be <= grid.props[:cols], "#{item[:id]}: #{child.props[:key]} at #{at}"
+        end
+      end
+    end
   end
 
-  describe 'the Combat routines page' do
+  it 'puts the settings of a line in the same label and box columns as every other line' do
+    editor.on_show_page('hunting')
+    grid = nodes(render, :grid).find { |node| node.props[:key] == 'page' }
+    expect(grid.props[:cols]).to eq(6)
+    at = grid.children.to_h { |child| [child.props[:key], child.props[:placement]] }
+    expect(at['l-hunting_stance']).to eq(column: 1)
+    expect(at['hunting_stance']).to eq(column: 2)
+    expect(at['l-wander_stance']).to eq(column: 3)
+    expect(at['wander_stance']).to eq(column: 4)
+    expect(at['l-stand_stance']).to eq(column: 5)
+    expect(at['stand_stance']).to eq(column: 6)
+    expect(at['flee_count']).to eq(column: 2)
+    expect(at['lone_targets_only']).to eq(column: 4, span: 2)
+    expect(at['f-flee_message']).to eq(column: 2, span: 5)
+    stance = grid.children.find { |child| child.props[:key] == 'hunting_stance' }
+    expect(stance.props).not_to have_key(:label)
+    expect(grid.children.find { |child| child.props[:key] == 'l-hunting_stance' }.props[:content]).to eq('Attack')
+    expect(grid.children.find { |child| child.props[:key] == 'lone_targets_only' }.props[:label]).to eq('Lone targets')
+    expect(at.keys).not_to include('l-box_in_hand', 'f-box_in_hand', 'box_in_hand')
+  end
+
+  describe 'the Combat page' do
     before { editor.on_show_page('combat') }
 
-    it 'lists every routine as one lettered list with Quick and Fried last' do
+    it 'lists every routine by its letter with Quick and Fried last, in the page grid' do
       editor.on_change('hunting_commands_b', 'kick, punch')
-      builder = render
-      routines = nodes(builder, :group).find { |node| node.props[:key] == 'routines' }
-      expect(routines.props[:label]).to eq('Routines')
-      rows = nodes(builder, :stack).select { |node| node.props[:key].to_s.start_with?('f-') }
-      expect(rows.map { |node| node.props[:key] }).to eq(
-        %w[hunting_commands hunting_commands_b hunting_commands_c hunting_commands_d hunting_commands_e
-           hunting_commands_f hunting_commands_g hunting_commands_h hunting_commands_i hunting_commands_j
-           quick_commands disable_commands].map { |key| "f-#{key}" }
-      )
-      words = nodes(builder, :text).select { |node| node.props[:key].to_s.start_with?('w-') }.map { |node| node.props[:content] }
-      expect(words).to eq(%w[a b c d e f g h i j Quick Fried])
-      # One grid, so the words share a column and the boxes line up.
-      grid = nodes(builder, :grid).find { |node| node.props[:key] == 'lettered' }
-      expect(grid.props).to include(cols: 2, homogeneous: false, expand_columns: [2])
-      expect(grid.children.size).to eq(24)
-      box = nodes(builder, :text_input).find { |node| node.props[:key] == 'hunting_commands_b' }
+      grid = nodes(render, :grid).find { |node| node.props[:key] == 'page' }
+      words = grid.children.select { |node| node.props[:key].to_s.start_with?('l-hunting_commands', 'l-quick', 'l-disable') }
+      expect(words.map { |node| node.props[:content] }).to eq(%w[a b c d e f g h i j Quick Fried])
+      box = nodes(render, :text_input).find { |node| node.props[:key].to_s.start_with?('hunting_commands_b') }
       expect(box.props[:value]).to eq('kick, punch')
       expect(box.props[:label]).to be_nil
       box.on[:change].call(FakeEvent.new({ value: 'kick' }))
       expect(editor.list_entries('hunting_commands_b')).to eq(['kick'])
     end
 
-    it 'keeps the aiming orders behind a button' do
-      builder = render
-      expect(nodes(builder, :group).map { |node| node.props[:key] }).not_to include('aiming')
-      show = nodes(builder, :button).find { |node| node.props[:key] == 'show-aiming' }
-      show.on[:activate].call(FakeEvent.new({}))
-      builder = render
-      aiming = nodes(builder, :group).find { |node| node.props[:key] == 'aiming' }
-      expect(aiming.props[:label]).to eq('Aiming')
-      words = nodes(builder, :text).select { |node| node.props[:key].to_s.start_with?('w-') }.map { |node| node.props[:content] }
-      expect(words.last(3)).to eq(%w[Ambush Ranged Unarmed])
-      expect(nodes(builder, :grid).count { |node| node.props[:key] == 'lettered' }).to eq(2)
-      expect(nodes(builder, :text_input).map { |node| node.props[:key] }).to include('ambush', 'archery_aim', 'aim')
-      nodes(builder, :button).find { |node| node.props[:key] == 'hide-aiming' }.on[:activate].call(FakeEvent.new({}))
-      expect(nodes(render, :group).map { |node| node.props[:key] }).not_to include('aiming')
+    it 'folds aiming and unarmed away, counting only what is really set' do
+      editor.on_change('uac_smite', false)
+      editor.on_change('mstrike_mob', '3')
+      labels = nodes(render, :button).select { |node| node.props[:key] == 'fold' }.map { |node| node.props[:label] }
+      expect(labels).to eq(['Show', 'Show (1 set)'])
+      expect(nodes(render, :text_input).map { |node| node.props[:key].to_s }).not_to include(a_string_starting_with('ambush'))
+      editor.on_toggle_fold('Aiming')
+      words = nodes(render, :text).select { |node| %w[l-ambush l-archery_aim l-aim].include?(node.props[:key]) }
+      expect(words.map { |node| node.props[:content] }).to eq(%w[Ambush Ranged Unarmed])
     end
   end
 
