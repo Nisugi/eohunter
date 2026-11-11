@@ -79,6 +79,12 @@ module EO::Engine
       #
       # @return [Integer, Time, nil]
       attr_accessor :recover_seq, :rally_member_at
+      # Group aid: when each [victim, kind] need was first seen and last
+      # cast for, and the need the last reason picked.
+      #
+      # @return [Hash{Array => Time}, Hash{Array => Time}, Aid::Need, nil]
+      attr_reader :aid_seen, :aid_cast_at, :aid_cleared
+      attr_accessor :aid_need
 
       def initialize
         @queue = []
@@ -88,6 +94,10 @@ module EO::Engine
         @hive_trap_room = nil
         @creature = nil
         @rally_member_at = nil
+        @aid_seen = {}
+        @aid_cast_at = {}
+        @aid_cleared = {}
+        @aid_need = nil
       end
 
       # Remember an id the game refused to TARGET, within the cap.
@@ -306,12 +316,13 @@ module EO::Engine
       # @param world [World]
       # @param policy [Policy]
       # @param state [State]
-      # @return [Symbol, nil] :queued, :rally, :rally_member, :poison,
+      # @param aid [Aid::Link, nil] the group's roster; nil alone
+      # @return [Symbol, nil] :queued, :rally, :rally_member, :aid, :poison,
       #   :disease, :stun, :web_bound, :grounded, :magical, :cloud, :globe,
       #   :runestone, :web, :determination, or nil for nothing to do
       # @bigshot group_status_ailments
       # @bigshot cmd_1040
-      def reason(world, policy, state)
+      def reason(world, policy, state, aid: nil)
         return :queued if state.queue.any?
 
         me = world.me
@@ -321,7 +332,13 @@ module EO::Engine
         # 6281); a group member showing an ailment gets one cast.
         if policy.troubadours_rally && world.spell[1040]&.known?
           return :rally if rally_needed?(me)
-          return :rally_member if member_needs_rally?(world, state)
+          return :rally_member if aid.nil? && member_needs_rally?(world, state)
+        end
+        # A groupmate's need comes before our own poison: we can carry a
+        # poison, and a stunned friend may not live through the wait.
+        if aid && (need = Aid.pick(world, aid.roster, aid.name, state))
+          state.aid_need = need
+          return :aid
         end
 
         debuffs = me.debuff_names
@@ -462,6 +479,183 @@ module EO::Engine
         ::Lich::Gemstone::Feat.available?(name, min_rank: min_rank)
       rescue StandardError
         false
+      end
+    end
+
+    # Group aid: a groupmate's ailment, fixed by whoever in the group can.
+    #
+    # ecleanse was written for one character, and bigshot's only group
+    # help is 1040 (Stun Relief sits on its to-do list). Here every member
+    # publishes the remedies it can cast at others and the ailments only
+    # it can see; the leader merges them into the state that rides back on
+    # every report, so each member holds the same roster. A need is a
+    # groupmate here that the room shows stunned or muckled, or whose own
+    # entry says poisoned or diseased. The members that could answer it
+    # rank themselves by name, the same order on every character: the
+    # first casts at once and each next one STAGGER seconds later, looking
+    # again before it casts, so one problem draws one cast without a
+    # message between them.
+    module Aid
+      module_function
+
+      # The spells cast for a groupmate, per need, in preference order.
+      REMEDIES = { stun: [108, 1040], muckled: [1040], poison: [114], disease: [113] }.freeze
+      # Every spell a remedy names.
+      SPELLS = REMEDIES.values.flatten.uniq.freeze
+      # Seconds between one candidate's turn and the next one's.
+      STAGGER = 1.5
+      # Seconds a victim that can cure its own poison or disease has
+      # before the others step in.
+      SELF_GRACE = 4
+      # Seconds before the same need on the same victim gets another cast:
+      # long enough for the room, or the victim's report, to show the cure.
+      REPEAT = { stun: 4, muckled: 4, poison: 8, disease: 8 }.freeze
+      # A groupmate's room status that 108 answers, and those only 1040 does:
+      # with STUN, all of Survival::STUNNED, the rally the aid replaces.
+      STUN = /stunned/i
+      MUCKLED = /webbed|sleeping|frozen|immobilized|held in place|horrified|staggered/i
+      # Needs the victim may answer itself first.
+      SELF_CURABLE = %i[poison disease].freeze
+      # The game's word that a groupmate's stun is over, on the raw line
+      # (names and the pronoun are links). Lich's room status lags it by a
+      # moment: on 2026-11-10 a second 108 went out 0.2s after Monstr was
+      # clear, on a status that still read stunned.
+      CLEARED = %r{noun="(\w+)">\w+</a> shakes off .{0,120}?stunned state}
+
+      # A need this character acts on: who, what, and the spell it casts.
+      Need = Struct.new(:victim, :kind, :spell, keyword_init: true)
+
+      # The behavior's view of the group: this character's name, and the
+      # roster as the leader last merged it.
+      Link = Struct.new(:name, :source, keyword_init: true) do
+        # @return [Hash{String => Hash}] name => { helps:, ailments: }
+        def roster
+          r = source.call
+          r.is_a?(Hash) ? r : {}
+        rescue StandardError
+          {}
+        end
+      end
+
+      # This character's roster entry: the remedies it knows, and the
+      # ailments no one else can see.
+      #
+      # @param world [World]
+      # @return [Hash] { helps: [Integer], ailments: [Symbol] }
+      def own(world)
+        me = world.me
+        ailments = []
+        ailments << :poison if me.poisoned? || Array(me.debuff_names).any? { |k| k =~ /Wall of Thorns Poison/ }
+        ailments << :disease if me.diseased?
+        { helps: known(world), ailments: ailments }
+      end
+
+      # @param world [World]
+      # @return [Array<Integer>] the remedy spells this character knows
+      def known(world) = SPELLS.select { |n| world.spell[n]&.known? }
+
+      # The group's members: Lich's Group, and every name on the roster.
+      # On a follower Lich's Group only learns of members who join after
+      # it does, so a follower that joined last knew only the leader and
+      # never saw a groupmate's stun (2026-11-10, Monstr). The roster is
+      # the hub's own list.
+      #
+      # @return [Array<String>]
+      def members(world, roster) = world.group_nouns | roster.keys.map(&:to_s)
+
+      # Every need in the room, as [victim, kind] pairs.
+      #
+      # @param world [World]
+      # @param roster [Hash{String => Hash}]
+      # @param name [String] this character
+      # @return [Array<Array(String, Symbol)>]
+      def needs(world, roster, name)
+        grouped = members(world, roster)
+        here = Array(world.room.players).select { |p| grouped.include?(p.noun.to_s) && p.status.to_s !~ /dead/i }
+        list = here.filter_map do |p|
+          status = p.status.to_s
+          kind = if status =~ STUN then :stun
+                 elsif status =~ MUCKLED then :muckled
+                 end
+          [p.noun.to_s, kind] if kind
+        end
+        present = here.map { |p| p.noun.to_s }
+        roster.each do |who, entry|
+          next if who == name || !present.include?(who)
+
+          Array(entry && entry[:ailments]).each { |a| list << [who, a.to_sym] if REMEDIES.key?(a.to_sym) }
+        end
+        list.uniq
+      end
+
+      # The members that could answer a need, in turn order: here, not
+      # muckled themselves, knowing one of its remedies. This character
+      # stands in with what it knows, whatever the roster says.
+      #
+      # @return [Array<String>] sorted names
+      def candidates(world, roster, name, mine, victim, kind)
+        remedies = REMEDIES[kind]
+        statuses = Array(world.room.players).to_h { |p| [p.noun.to_s, p.status.to_s] }
+        pool = roster.filter_map do |who, entry|
+          next if who == name || !statuses.key?(who)
+          next if statuses[who] =~ EO::Engine::Survival::STUNNED || statuses[who] =~ /dead/i
+          next if (Array(entry && entry[:helps]) & remedies).empty?
+
+          who
+        end
+        pool << name unless (mine & remedies).empty?
+        (pool.uniq - [victim]).sort
+      end
+
+      # The game said this groupmate's stun ended, within REPEAT[:stun].
+      #
+      # @return [Boolean]
+      def cleared?(state, victim, now = Time.now)
+        at = state.aid_cleared[victim]
+        !at.nil? && now - at < REPEAT[:stun]
+      end
+
+      # The need this character should answer now, if any.
+      #
+      # @param world [World]
+      # @param roster [Hash{String => Hash}]
+      # @param name [String] this character
+      # @param state [State] carries aid_seen and aid_cast_at
+      # @param now [Time]
+      # @return [Need, nil]
+      def pick(world, roster, name, state, now = Time.now)
+        me = world.me
+        current = needs(world, roster, name)
+        state.aid_seen.select! { |key, _| current.include?(key) }
+        state.aid_cast_at.reject! { |_, at| now - at > 60 }
+        current.each do |key|
+          next if state.aid_seen.key?(key)
+
+          state.aid_seen[key] = now
+          Events.emit(:aid_seen, victim: key[0], need: key[1])
+        end
+        return nil if me.dead? || me.muckled? || !me.able_to_cast?
+
+        mine = known(world)
+        return nil if mine.empty?
+
+        current.each do |victim, kind|
+          key = [victim, kind]
+          last = state.aid_cast_at[key]
+          next if last && now - last < REPEAT[kind]
+          next if kind == :stun && cleared?(state, victim, now)
+
+          rank = candidates(world, roster, name, mine, victim, kind).index(name)
+          next if rank.nil?
+
+          wait = rank * STAGGER
+          wait += SELF_GRACE if SELF_CURABLE.include?(kind) && !(Array(roster.dig(victim, :helps)) & REMEDIES[kind]).empty?
+          next if now - state.aid_seen[key] < wait
+
+          spell = REMEDIES[kind].map { |n| world.spell[n] }.find { |s| s&.known? && s.affordable? }
+          return Need.new(victim: victim, kind: kind, spell: spell) if spell
+        end
+        nil
       end
     end
   end
@@ -1525,6 +1719,68 @@ module EO::Engine
         Result.new(status: :success, reason: :vat)
       end
     end
+
+    # Group aid: one cast for a groupmate's need. 108 and the cures go at
+    # the victim; 1040 is a room song and goes out as is (bigshot cmd_1040).
+    class CleanseAid < Base
+      include CleanseHelpers
+
+      # @param world [World]
+      # @param need [Cleanse::Aid::Need]
+      # @param cleared [#call] -> Boolean, the game said the stun ended
+      # @param opts [Hash] Base's keywords (interrupt)
+      def initialize(world, need:, cleared: -> { false }, roster: -> { {} }, **opts)
+        super(world, **opts)
+        @need = need
+        @cleared = cleared
+        @roster = roster
+      end
+
+      # Dead, or the groupmate already over it, refuses the cast.
+      #
+      # @return [Symbol] :ok, or the gate that refused
+      def preconditions
+        return :dead if me.dead?
+        return :recovered unless still_needed?
+
+        :ok
+      end
+
+      # Look again after the roundtime, then one cast.
+      #
+      # @return [Actions::Result] success with :aid_<kind>; skipped with
+      #   :recovered or :unaffordable
+      def perform
+        return Result.new(status: :skipped, reason: :recovered) unless still_needed?
+
+        s = @need.spell
+        return Result.new(status: :skipped, reason: :unaffordable) unless s.affordable?
+
+        Events.emit(:aid_cast, victim: @need.victim, need: @need.kind, spell: s.num)
+        s.num == 1040 ? s.cast : s.cast("at #{@need.victim}")
+        Result.new(status: :success, reason: :"aid_#{@need.kind}")
+      end
+
+      private
+
+      # A room-seen need holds while the room still shows it; a reported
+      # one is trusted until the report changes.
+      def still_needed?
+        re = { stun: Cleanse::Aid::STUN, muckled: Cleanse::Aid::MUCKLED }[@need.kind]
+        # Poison and disease show only in the victim's report: read the
+        # latest after the roundtime wait, in case another member cured it.
+        return reported_ailing? if re.nil?
+        return false if @need.kind == :stun && @cleared.call
+
+        p = Array(@world.room.players).find { |pl| pl.noun.to_s == @need.victim }
+        !p.nil? && p.status.to_s =~ re ? true : false
+      end
+
+      def reported_ailing?
+        entry = @roster.call[@need.victim]
+        Array(entry && entry[:ailments]).any? { |a| a.to_sym == @need.kind }
+      end
+    end
   end
 
   module Behaviors
@@ -1551,9 +1807,12 @@ module EO::Engine
       # @param policy [EO::Engine::Cleanse::Policy]
       # @param state [EO::Engine::Cleanse::State] fresh unless given
       # @param travel [#call] (room) -> Trip or Boolean; default a Travel trip
-      def initialize(policy:, state: EO::Engine::Cleanse::State.new, travel: nil)
+      # @param aid [EO::Engine::Cleanse::Aid::Link, nil] the group's roster,
+      #   for helping groupmates; nil alone or with group aid off
+      def initialize(policy:, state: EO::Engine::Cleanse::State.new, travel: nil, aid: nil)
         super()
         @policy = policy
+        @aid = aid
         @state = state
         @travel = travel || EO::Engine::Travel.default
         @trip = nil
@@ -1591,7 +1850,7 @@ module EO::Engine
       def wants_control?(world)
         return true if @job
 
-        @reason = EO::Engine::Cleanse::Predicates.reason(world, @policy, @state)
+        @reason = EO::Engine::Cleanse::Predicates.reason(world, @policy, @state, aid: @aid)
         !@reason.nil?
       end
 
@@ -1604,7 +1863,7 @@ module EO::Engine
       def tick(world)
         return step_job(world) if @job
 
-        reason = @reason || EO::Engine::Cleanse::Predicates.reason(world, @policy, @state)
+        reason = @reason || EO::Engine::Cleanse::Predicates.reason(world, @policy, @state, aid: @aid)
         return nil if reason.nil?
 
         Events.emit(:cleansing, reason: reason)
@@ -1684,6 +1943,13 @@ module EO::Engine
         when :rally_member
           @state.rally_member_at = Time.now
           Actions::CleanseRally.new(world).call
+        when :aid
+          need = @state.aid_need
+          @state.aid_cast_at[[need.victim, need.kind]] = Time.now
+          state = @state
+          aid = @aid
+          Actions::CleanseAid.new(world, need: need, cleared: -> { EO::Engine::Cleanse::Aid.cleared?(state, need.victim) },
+                                         roster: -> { aid.roster }).call
         end
       end
 
@@ -1750,6 +2016,10 @@ module EO::Engine
         Events.on(:hive_trap) { |e| state.hive_trap_room = e.data[:room_id]; state.enqueue(event: e.data[:kind]) }
         Events.on(:itchy_curse) { state.enqueue(event: :itchy_curse) }
         Events.on(:entangled) { state.enqueue(event: :remove_web_bound) }
+        return unless @aid
+
+        Watch.on(EO::Engine::Cleanse::Aid::CLEARED, :aid_cleared) { |m| { victim: m[1] } }
+        Events.on(:aid_cleared) { |e| state.aid_cleared[e.data[:victim]] = Time.now }
       end
     end
   end

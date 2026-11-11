@@ -211,10 +211,11 @@ RSpec.describe EO::Engine::Group::Leader do
 
   # The Report Struct is the DRb wire format: Marshal refuses a Struct of
   # another size (TypeError, struct size differs) before any field could
-  # be read, so the cycle rides in rest_prep_done and the layout stays.
-  it 'keeps the Report layout a follower on the old build serializes' do
+  # be read, so leader and followers must run the same build. The layout
+  # is pinned so a change to it is a deliberate one.
+  it 'keeps the Report layout pinned' do
     expect(EO::Engine::Group::Report.members).to eq(%i[name room rt hidden sneaky looting rest_prep_done rest_reason
-                                                       not_hunting_reason encumbrance_left wounded bounty at])
+                                                       not_hunting_reason encumbrance_left wounded bounty aid at])
     old = Marshal.load(Marshal.dump(report('Bob', rest_prep_done: true)))
     hub.report('Bob', old)
     hub.report('Ann', report('Ann', rest_prep_done: true))

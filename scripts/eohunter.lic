@@ -390,6 +390,7 @@ module EOHunter
     E::Events.on(:fleeing) { |e| msg('warn', "fleeing: #{e.data[:reason]}") }
     E::Events.on(:cleansing) { |e| msg('warn', "cleanse: #{e.data[:reason]}") }
     E::Events.on(:cleansed) { |e| msg('debug', "cleanse #{e.data[:reason]}: #{e.data[:result]}") }
+    E::Events.on(:aid_cast) { |e| msg('info', "aid: #{e.data[:spell]} for #{e.data[:victim]} (#{e.data[:need]})") }
     E::Events.on(:disarmed) { |e| msg('error', "DISARMED: #{e.data[:noun]} in room #{e.data[:room]}") }
     E::Events.on(:cleanse_stuck) { |e| msg('error', e.data[:reason]); rest.rest!(e.data[:reason]) if rest.respond_to?(:rest!) }
     E::Events.on(:loadout_stuck) do |e|
@@ -530,7 +531,8 @@ module EOHunter
                                   scripts: scripts, travel: travel, buffs: buffs)
     cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'),
                                              char_settings: CharSettings.to_hash)
-    cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
+    aid = leader && profile['group_aid'] ? E::Cleanse::Aid::Link.new(name: Char.name, source: -> { leader.aid_roster }) : nil
+    cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel, aid: aid)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { rest.resting? })
     flee_policy = profile.flee_policy
     flee_policy.bandits = tracking.bandits?
@@ -691,7 +693,8 @@ module EOHunter
                                         owner: assist, resting: -> { orders.resting? })
     cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'),
                                              char_settings: CharSettings.to_hash)
-    cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
+    aid = profile['group_aid'] ? E::Cleanse::Aid::Link.new(name: Char.name, source: -> { member.aid_roster }) : nil
+    cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel, aid: aid)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { orders.resting? }, follower: true)
     flee = E::Behaviors::Flee.new(policy: profile.flee_policy, targets_policy: targets_policy, walker: walker,
                                   group_nouns: -> { world.group_nouns },
@@ -1080,7 +1083,8 @@ if mode == 'tail'
                                               sneaky: behaviors[:sneaky], looting: behaviors[:loot].looting?,
                                               rest_prep_done: behaviors[:rest].rest_prep_done,
                                               forced: behaviors[:rest].forced_reason, encumbrance: encumbrance,
-                                              bounty: bounty_mode ? EO::Engine::Group.bounty_state(w) : nil))
+                                              bounty: bounty_mode ? EO::Engine::Group.bounty_state(w) : nil,
+                                              aid: EO::Engine::Cleanse::Aid.own(w)))
     if Time.now - checked_at > 5
       checked_at = Time.now
       engine.stop!(:leader_lost) unless member.leader_alive?
@@ -1164,7 +1168,8 @@ if leader
     # signs step after the rally gather, and the hunting room - so a
     # follower holds its signs for the refuge and both walks and casts
     # them with the leader before the last trip out.
-    leader.publish(w, phase: rest.resting? ? :resting : :hunting, target: engage.target, signs: rest.signs_phase?)
+    leader.publish(w, phase: rest.resting? ? :resting : :hunting, target: engage.target, signs: rest.signs_phase?,
+                      aid: EO::Engine::Cleanse::Aid.own(w))
   end
   # the heartbeat again between ticks, so a blocking action never reads as a dead leader
   leader.keep_alive!
