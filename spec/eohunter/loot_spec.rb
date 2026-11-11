@@ -262,6 +262,9 @@ RSpec.describe EO::Engine::Behaviors::Loot do
         def solo? = false
         def looting_done? = true
         def looter(*) = @looter
+        def final_looter(*) = @final || @looter
+        attr_writer :final
+
         def order(type, payload = nil, room:) = @orders << [type, payload, room]
       end
     end
@@ -296,6 +299,21 @@ RSpec.describe EO::Engine::Behaviors::Loot do
       expect(sent).to eq(['loot #1', 'loot #1', 'loot #1', 'loot room'])
       expect(counters.lte_boosts).to eq(1)
       expect(counters.overkill).to eq(0)
+    end
+
+    it 'hands the final loot of the floor to the final looter and does not loot it again' do
+      group = group_class.new('Lead', 'Lead')
+      group.final = 'Bob'
+      policy.final = true
+      room.creatures.clear
+      room.loot = [OpenStruct.new(id: '7', name: 'gem', noun: 'gem', type: 'gem')]
+      leader = described_class.new(policy: policy, targets_policy: EO::Engine::Targets::Policy.new, rest_policy: rest_policy,
+                                   counters: counters, scripts: scripts, group: group, stance: ->(_s) { true })
+      expect(leader.wants_control?(world)).to be true
+      expect(leader.tick(world).reason).to eq(:loot_assigned)
+      expect(group.orders).to eq([[:prep_rest, nil, 1], [:loot, 'Bob', 1]])
+      expect(sent).to be_empty
+      expect(leader.wants_control?(world)).to be false
     end
 
     it 'counts nothing on the assigned follower, whose count is the order from the leader' do
