@@ -178,6 +178,16 @@ RSpec.describe EO::Engine::Trace::Session do
       expect(line).not_to include('wander')
     end
 
+    it 'says why the holder wanted the tick and how long a slow turn took' do
+      holder = behavior('survival', 0, true, reason: :prone, result: EO::Engine::Actions::Result.new(status: :success))
+      slow = EO::Engine::Engine.new(world: world, behaviors: [holder], interval: 0)
+      allow(slow).to receive(:last_action_seconds).and_return(20.8)
+      session.configure('on' => true, 'tick' => true)
+      session.install!(slow)
+      slow.tick
+      expect(lines.last).to include('holder=survival why=prone took=20.8s status=success')
+    end
+
     it 'is off unless asked for, and marks an idle tick' do
       session.install!(engine)
       engine.tick

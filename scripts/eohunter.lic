@@ -540,6 +540,10 @@ module EOHunter
     maintain = E::Behaviors::Maintain.new(policy: profile.maintain_policy, state: maintain_state, buffs: buffs,
                                           signs_wanted: -> { rest.signs_phase? })
     rest.restore_buffs = maintain.method(:restore_buff) if buffs
+    # Rest's :signs step casts before the trip to the hunting room, with
+    # Maintain's turn: Rest outranks it and would otherwise hold the
+    # first cast until the first hunting tick.
+    rest.cast_signs = ->(w) { maintain.wants_control?(w) ? maintain.tick(w) : nil }
     engage_policy = profile.engage_policy
     engage_policy.priority = false if tracking.bandits?
     engage = E::Behaviors::Engage.new(policy: engage_policy, targets_policy: targets_policy, wander_policy: wander_policy,
@@ -1071,6 +1075,7 @@ if mode == 'tail'
   checked_at = Time.now
   encumbrance = EO::Engine::Rest::Encumbrance.new(seconds: profile['encumbrance_grace_seconds'])
   engine.on_tick do |w|
+    behaviors[:rest].answer_signs(-> { !behaviors[:maintain].wants_control?(w) })
     member.report(EO::Engine::Group.report(w, name: Char.name, rest_policy: behaviors[:rest_policy], counters: behaviors[:counters],
                                               sneaky: behaviors[:sneaky], looting: behaviors[:loot].looting?,
                                               rest_prep_done: behaviors[:rest].rest_prep_done,
@@ -1155,9 +1160,10 @@ if leader
   EOHunter.wire_movement(engine, leader: leader) if leader.strict_movement?
   engine.on_tick do |w|
     # :resting stays the whole non-hunting leg, which is what the followers'
-    # Survival and Loadout gate on. signs says the narrower thing - at the
-    # hunting room, where signs belong - so a follower holds its signs for
-    # the refuge and both walks and casts them on arrival.
+    # Survival and Loadout gate on. signs says the narrower thing - the
+    # signs step after the rally gather, and the hunting room - so a
+    # follower holds its signs for the refuge and both walks and casts
+    # them with the leader before the last trip out.
     leader.publish(w, phase: rest.resting? ? :resting : :hunting, target: engage.target, signs: rest.signs_phase?)
   end
   # the heartbeat again between ticks, so a blocking action never reads as a dead leader
