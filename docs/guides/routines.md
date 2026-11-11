@@ -160,7 +160,8 @@ With `!` the comparison flips: `!m40` skips when mana is 40 or more.
 | `empowered20` | an Empowered buff of +20 or more is up |
 | `thp50` | the target's health percent is above 50 |
 | `repeatdelay30` | the same line ran within the last 30 seconds |
-| `EB"Name"` | the buff is not active (`!EB` when it is) |
+| `EB"Name"` | the buff is not active (`!EB` when it is). Also reads Lich's own timer for a spell of that name, for effects the game never lists, like Briar Betrayer |
+| `EB7"Name"`, `ES7"Name"`, `EC7"Name"`, `ED7"Name"` | as without the number, counting the effect as up only with more than 7 seconds left: `script volley(!EB7"Briar Betrayer")` skips until the last 7 seconds |
 | `ES"Name"` | the spell effect is not active |
 | `EC"Name"` | the cooldown is not active |
 | `ED"Name"` | the debuff is not active |

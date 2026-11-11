@@ -94,6 +94,15 @@ module EO::Engine
         Array(world.room.players).any? { |p| p.status.to_s =~ STUNNED && nouns.include?(p.noun.to_s) }
       end
 
+      # A living group member on the ground: nobody walks off and leaves them.
+      #
+      # @param world [World]
+      # @return [Boolean]
+      def group_member_down?(world)
+        nouns = world.group_nouns
+        Array(world.room.players).any? { |p| p.status.to_s =~ DOWN && p.status.to_s !~ /dead/ && nouns.include?(p.noun.to_s) }
+      end
+
       # In priority order: :dead, :trapped (an escape room), :deader (a dead
       # player to stop for), :prone (not standing, unless resting), :pull.
       #
@@ -157,6 +166,10 @@ module EO::Engine
       # @return [Actions::Result] the STAND that got us up, or failed
       #   with :still_down
       def perform
+        # The roundtime just slept out may be a long one (a charge gives 20
+        # seconds), and a groupmate may have pulled us up during it.
+        return Result.new(status: :skipped, reason: :already_standing) if me.standing?
+
         # Lich's Stance.at?: already in the stand stance means nothing to
         # change and nothing to restore (a regex on the stance word read
         # "advance" as "advanced" and could not read a percentage stance).
@@ -310,8 +323,14 @@ module EO::Engine
         when :dead then died(world)
         when :trapped then Actions::Escape.new(world).call
         when :deader then deader(world)
-        when :prone then Actions::Stand.new(world, stance: @stance, stand_stance: @policy.stand_stance).call
-        when :pull then Actions::Pull.new(world, player: EO::Engine::Survival::Predicates.to_pull(world, @policy).first).call
+        when :prone
+          # Before the action, which blocks: the trace shows when it began.
+          Events.emit(:standing, room: world.room.id)
+          Actions::Stand.new(world, stance: @stance, stand_stance: @policy.stand_stance).call
+        when :pull
+          player = EO::Engine::Survival::Predicates.to_pull(world, @policy).first
+          Events.emit(:pulling, player: player.noun, status: player.status)
+          Actions::Pull.new(world, player: player).call
         end
       end
 

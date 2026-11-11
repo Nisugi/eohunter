@@ -248,9 +248,10 @@ overweight; the grace does not relax recovery thresholds.
 | `hunting_aim` | string | none | Loadout: the body part aimed at once when a loadout is established |
 | `hunting_loadout_sets` | mapping | {} | Named right/left/aim overrides of the default hunting hands |
 | `hunting_loadout_rules` | list | [] | Ordered target/type selectors for named sets; first match wins |
-| `signs` | split | none | Maintain: the signs, spells and symbols to keep up; `650 panther evoke` style entries work |
+| `signs` | split | none | Maintain: the signs, spells and symbols to keep up; `650 panther evoke` style entries work. First cast after the rally gather (or where you stand, with no rally rooms), before the trip to the hunting room, unless the map tags that room no-magic; held for the walks |
 | `bless` | bool | false | Maintain: Voln's bless on the weapon |
 | `check_favor` | bool | false | Maintain: skip a symbol the favor cannot pay for |
+| `turbo` | string | off | Engage: `off` waits for each of TARGET, stance and command; `stance` waits for TARGET, then sends stance and command together; `all` (or `true`) sends all three together, and falls back to a normal TARGET if it did not land within a second. Not in the setup editor yet |
 | `priority` | bool | false | Engage: the first target in the profile's order rather than the nearest |
 | `targets` | targets | none | Targets: what to fight and with which routine |
 | `quickhunt_targets` | targets | none | Targets: the quick routine's targets |
