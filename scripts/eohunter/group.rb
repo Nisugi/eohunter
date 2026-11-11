@@ -2240,15 +2240,16 @@ module EO::Engine
       # @param travel [#call, nil] (room) -> Trip or Boolean; default a Travel trip
       # @param clock [#now] the time source
       # @param stance [#call, nil] (name) -> Boolean; default Lich's Stance.change
-      # @param wander_stance [String, nil] the stance to walk in; nil keeps it
-      def initialize(member:, travel: nil, clock: Time, stance: nil, wander_stance: nil)
+      # @param stance_at [#call, nil] (name) -> Boolean; default Lich's Stance.at?
+      # @param wander_stance [String, nil] the stance out of a fight; nil keeps it
+      def initialize(member:, travel: nil, clock: Time, stance: nil, stance_at: nil, wander_stance: nil)
         super()
         @member = member
         @travel = travel || EO::Engine::Travel.default
         @clock = clock
         @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @stance_at = stance_at || ->(name) { ::Lich::Gemstone::Stance.at?(name) }
         @wander_stance = wander_stance
-        @stanced_room = nil
         @trip = nil
         @independent = false
         @rejoin = false
@@ -2311,11 +2312,9 @@ module EO::Engine
           return Actions::Result.new(status: :skipped, reason: :roundtime)
         end
 
-        # The leader walks us room to room in whatever stance the last
-        # routine line left: as Wander does for the leader, the wander
-        # stance once per room, with nothing here worth a fight (Assist
-        # sits above and has the room first when there is).
-        drop_stance(world) if stance_due?(world)
+        # Out of a fight, the wander stance: the moment nothing here is
+        # alive, not on the next room (Assist sits above while it fights).
+        @stance.call(@wander_stance) if stance_due?(world)
 
         unless leader_here?(world)
           room = @member.leader_room
@@ -2350,13 +2349,12 @@ module EO::Engine
 
       private
 
-      def stance_due?(world) = !@wander_stance.nil? && @stanced_room != world.room.id
+      # Out of the wander stance with no creature alive here.
+      def stance_due?(world)
+        return false if @wander_stance.nil?
+        return false if Array(world.room.targets).any? { |t| t.status.to_s !~ /dead|gone/ }
 
-      # Once per room: Lich's Stance.change waits out roundtime, so a
-      # repeat every tick would add that wait to every tick.
-      def drop_stance(world)
-        @stanced_room = world.room.id
-        @stance.call(@wander_stance)
+        !@stance_at.call(@wander_stance)
       end
 
       def leader_here?(world)

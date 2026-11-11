@@ -760,16 +760,18 @@ RSpec.describe EO::Engine::Behaviors::Follow do
     expect(follow.wants_control?(world)).to be false
   end
 
-  it 'drops to the wander stance once in each room the leader walks it into' do
+  it 'goes to the wander stance the moment nothing in the room is alive' do
     stances = []
-    walker = described_class.new(member: member, travel: ->(_r) { true }, stance: ->(n) { stances << n }, wander_stance: 'defensive')
-    expect(walker.wants_control?(world)).to be true
-    walker.tick(world)
+    at = 'offensive'
+    walker = described_class.new(member: member, travel: ->(_r) { true }, stance: ->(n) { stances << (at = n) },
+                                 stance_at: ->(n) { at == n }, wander_stance: 'defensive')
+    room.targets = [OpenStruct.new(status: '')]
     expect(walker.wants_control?(world)).to be false
-    room.id = 2
+    room.targets = [OpenStruct.new(status: 'dead')]
     expect(walker.wants_control?(world)).to be true
     walker.tick(world)
-    expect(stances).to eq(%w[defensive defensive])
+    expect(stances).to eq(%w[defensive])
+    expect(walker.wants_control?(world)).to be false
   end
 
   it 'goes to the leader\'s room when the leader is elsewhere' do
