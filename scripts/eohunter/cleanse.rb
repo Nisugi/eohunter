@@ -1729,10 +1729,11 @@ module EO::Engine
       # @param need [Cleanse::Aid::Need]
       # @param cleared [#call] -> Boolean, the game said the stun ended
       # @param opts [Hash] Base's keywords (interrupt)
-      def initialize(world, need:, cleared: -> { false }, **opts)
+      def initialize(world, need:, cleared: -> { false }, roster: -> { {} }, **opts)
         super(world, **opts)
         @need = need
         @cleared = cleared
+        @roster = roster
       end
 
       # Dead, or the groupmate already over it, refuses the cast.
@@ -1766,11 +1767,18 @@ module EO::Engine
       # one is trusted until the report changes.
       def still_needed?
         re = { stun: Cleanse::Aid::STUN, muckled: Cleanse::Aid::MUCKLED }[@need.kind]
-        return true if re.nil?
+        # Poison and disease show only in the victim's report: read the
+        # latest after the roundtime wait, in case another member cured it.
+        return reported_ailing? if re.nil?
         return false if @need.kind == :stun && @cleared.call
 
         p = Array(@world.room.players).find { |pl| pl.noun.to_s == @need.victim }
         !p.nil? && p.status.to_s =~ re ? true : false
+      end
+
+      def reported_ailing?
+        entry = @roster.call[@need.victim]
+        Array(entry && entry[:ailments]).any? { |a| a.to_sym == @need.kind }
       end
     end
   end
@@ -1939,7 +1947,9 @@ module EO::Engine
           need = @state.aid_need
           @state.aid_cast_at[[need.victim, need.kind]] = Time.now
           state = @state
-          Actions::CleanseAid.new(world, need: need, cleared: -> { EO::Engine::Cleanse::Aid.cleared?(state, need.victim) }).call
+          aid = @aid
+          Actions::CleanseAid.new(world, need: need, cleared: -> { EO::Engine::Cleanse::Aid.cleared?(state, need.victim) },
+                                         roster: -> { aid.roster }).call
         end
       end
 

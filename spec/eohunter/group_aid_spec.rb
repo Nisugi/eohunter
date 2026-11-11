@@ -262,11 +262,28 @@ RSpec.describe EO::Engine::Actions::CleanseAid do
     expect(spell.casts).to be_empty
   end
 
+  def poison_aid(roster)
+    spell = AidSpell.new(num: 114, known: true, affordable: true)
+    action = described_class.new(world, need: EO::Engine::Cleanse::Aid::Need.new(victim: 'Dicate', kind: :poison, spell: spell),
+                                        roster: -> { roster })
+    [action, spell]
+  end
+
   it 'trusts a reported poison, which the room cannot show' do
     room.players.first.status = ''
-    result, spell = aid(114, :poison)
-    expect(result.reason).to eq(:aid_poison)
+    action, spell = poison_aid({ 'Dicate' => { ailments: [:poison] } })
+    allow(action).to receive(:settle_rt)
+    expect(action.call.reason).to eq(:aid_poison)
     expect(spell.casts).to eq([['at Dicate']])
+  end
+
+  it 'casts nothing when a newer report says another member cured the poison during our roundtime' do
+    room.players.first.status = ''
+    roster = { 'Dicate' => { ailments: [:poison] } }
+    action, spell = poison_aid(roster)
+    allow(action).to receive(:settle_rt) { roster['Dicate'] = { ailments: [] } }
+    expect(action.call.reason).to eq(:recovered)
+    expect(spell.casts).to be_empty
   end
 end
 
