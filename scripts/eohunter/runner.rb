@@ -28,6 +28,10 @@ module EO::Engine
     # @return [Array<Array(String, Boolean)>]
     attr_reader :last_evaluations
 
+    # Seconds the holding behavior's turn took on the last tick; nil idle.
+    # @return [Float, nil]
+    attr_reader :last_action_seconds
+
     # The result the holding behavior returned on the last tick, nil when
     # the tick was idle or paused. With last_evaluations it is the whole
     # account of a tick, which the debug trace prints.
@@ -192,11 +196,14 @@ module EO::Engine
       behavior = choose
       hand_off(behavior)
       if behavior
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         result = behavior.tick(@world)
+        @last_action_seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - began
         @last_result = result
         track(behavior, result)
       else
         @last_result = nil
+        @last_action_seconds = nil
         idle
       end
       complete_tick
