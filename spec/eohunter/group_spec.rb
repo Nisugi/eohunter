@@ -644,6 +644,31 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(fogged).to be_empty
   end
 
+  it 'readies its hunting hands after the hunting prep, before the walk out' do
+    steps = []
+    allow_any_instance_of(EO::Engine::Actions::Command).to receive(:send_through_ladder) { |_c, cmd| steps << cmd; 'ok' }
+    orders.prepare_hands = ->(_w) { steps << :hands; nil }
+    hub.broadcast(:hunting_prep, room: 1)
+    run
+    expect(steps).to eq(['stand', :hands])
+    expect(orders.phase).to eq(:idle)
+    expect(hub.acked(:hunting_prep)).to eq(['Bob'])
+  end
+
+  it 'tries its hands again while muckled, and acks only once they are ready' do
+    answers = [EO::Engine::Actions::Result.new(status: :skipped, reason: :muckled), nil]
+    orders.prepare_hands = ->(_w) { answers.shift }
+    hub.broadcast(:hunting_prep, room: 1)
+    results = []
+    5.times { results << orders.tick(world) if orders.wants_control?(world) && answers.size == 2 }
+    expect(results.compact.last).to be_skipped
+    expect(orders.phase).to eq(:hands)
+    expect(hub.acked(:hunting_prep)).to be_empty
+    run
+    expect(answers).to be_empty
+    expect(hub.acked(:hunting_prep)).to eq(['Bob'])
+  end
+
   it 'runs follower resting scripts sequentially' do
     policy.resting_scripts = ['eherbs', 'eloot sell']
     hub.broadcast(:resting_scripts_start, room: 1)
@@ -1350,7 +1375,10 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(orders_sent).to eq([:hunting_prep])
     run_until(:rally_out)
     rest.tick(world)
-    expect(rest.phase).to eq(:rally) # everyone present already
+    expect(rest.phase).to eq(:hold) # present, but Bob's hunting prep is not acked
+    hub.ack(:hunting_prep, 'Bob', hunt_id: hub.hunt_id)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rally)
     run_until(:hunting_scripts)
     hub.take_orders('Bob') # the gathers' follow_nows
     rest.tick(world)
@@ -1424,7 +1452,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     checks = 0
     allow_any_instance_of(EO::Engine::Actions::GroupCheck).to receive(:quiet_group) { checks += 1; ['You are leading Bob.'] }
     rest.start!
-    run_until(:done) { hub.ack(:cast_signs, 'Bob', hunt_id: hub.hunt_id) } # Bob answers any signs order
+    run_until(:done) { %i[hunting_prep cast_signs].each { |t| hub.ack(t, 'Bob', hunt_id: hub.hunt_id) } } # Bob answers each order
     expect(checks).to eq(0)
     rest.tick(world)
     expect(rest.phase).to eq(:hunting)

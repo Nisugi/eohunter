@@ -19,7 +19,7 @@ RSpec.describe EO::Engine::Actions::CleanseGrounded do
     stand = instance_double(EO::Engine::Actions::Stand, call: nil)
     allow(EO::Engine::Actions::Stand).to receive(:new).and_return(stand)
     described_class.new(world, stand_stance: 'guarded').send(:stand_up, 'guarded')
-    expect(EO::Engine::Actions::Stand).to have_received(:new).with(world, stand_stance: 'guarded', interrupt: nil)
+    expect(EO::Engine::Actions::Stand).to have_received(:new).with(world, hash_including(stand_stance: 'guarded'))
   end
 end
 

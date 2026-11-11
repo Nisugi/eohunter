@@ -1054,6 +1054,22 @@ module EO::Engine
         order(:prepare_move, room: room)
       end
 
+      # The hunting prep, its acks cleared first: each follower acks once
+      # its prep commands have run and its hands are ready.
+      #
+      # @param room [Integer] the room the order is raised in
+      # @return [Order, nil] nil when solo
+      def order_hunting_prep(room)
+        @hub.clear_acks(:hunting_prep)
+        order(:hunting_prep, room: room)
+      end
+
+      # Every online follower has acked the hunting prep: its prep
+      # commands run and its hands ready, so the walk out can start.
+      #
+      # @return [Boolean]
+      def hunting_prep_done? = (online - @hub.acked(:hunting_prep)).empty?
+
       # Whether the group can move: legacy mode checks online followers;
       # strict mode rechecks local ownership and the full episode roster's
       # fresh preparations without consuming the permission.
@@ -2176,7 +2192,7 @@ module EO::Engine
           @assist&.stand_down!
           @stance.call(@policy.wander_stance) if @policy.wander_stance
           Actions::Result.new(status: :success)
-        when :hunting_prep then prep(@policy.hunting_prep_command_list, [], wait_for_scripts: true)
+        when :hunting_prep then prep(@policy.hunting_prep_command_list, [], wait_for_scripts: true, next_phase: :hands)
         when :hunting_scripts_start
           # Setting out: every member checks its group first (GroupCheck).
           Actions::GroupCheck.new(world).call
@@ -2224,10 +2240,11 @@ module EO::Engine
         end
       end
 
-      def prep(commands, scripts, wait_for_scripts: false)
+      def prep(commands, scripts, wait_for_scripts: false, next_phase: :idle)
         @commands = commands
         @script_list = scripts
         @wait_for_scripts = wait_for_scripts
+        @after_prep = next_phase
         @remaining = nil
         @phase = :prep
         nil
@@ -2249,7 +2266,8 @@ module EO::Engine
 
       def step(world)
         result = case @phase
-                 when :prep then step_prep(world, @commands, @script_list, :idle, wait_for_scripts: @wait_for_scripts)
+                 when :prep then step_prep(world, @commands, @script_list, @after_prep, wait_for_scripts: @wait_for_scripts)
+                 when :hands then step_hands(world)
                  when :travel then step_travel(world, @rooms, :idle)
                  when :room then step_room(world, @room, :idle)
                  when :fog then step_fog(world)
@@ -2259,6 +2277,22 @@ module EO::Engine
           @after.call
           @after = nil
         end
+        result
+      end
+
+      # After the hunting prep, the hunting hands, as the leader readies
+      # its own before the walk out (Rest#prepare_departure): ready before
+      # the trip, not on arrival. A failure is the loadout_stuck event's.
+      def step_hands(world)
+        result = @prepare_hands&.call(world)
+        # Skipped is a gate that refused (muckled): nothing was readied and
+        # no loadout_stuck was raised, so try again next tick, unacked.
+        return result if result&.skipped?
+
+        @phase = :idle
+        # Acked even when the hands failed: loadout_stuck has asked for
+        # the rest, and the leader must not hold the walk out for it.
+        @pending_ack = :hunting_prep
         result
       end
 

@@ -1175,7 +1175,7 @@ module EO::Engine
 
       # pre_hunt 7245-7250: the followers' prep first, then ours.
       def step_hunting_prep(world)
-        @group.order(:hunting_prep, room: world.room.id) if grouped?
+        @group.order_hunting_prep(world.room.id) if grouped?
         @remaining = nil
         @phase = :hunting_prep_own
         nil
@@ -1198,7 +1198,9 @@ module EO::Engine
           @disband_ticks = 0
           return hold(world, :disband, next_phase: :rally) { world.group_nouns.empty? || (@disband_ticks += 1) >= DISBAND_TICKS }
         end
-        hold(world, :before_rally, next_phase: :rally, follow: true) { @group.all_present?(world) }
+        # The followers' hunting prep acked too: a follower still in its
+        # prep commands would be walked off before its hands are ready.
+        hold(world, :before_rally, next_phase: :rally, follow: true) { @group.all_present?(world) && @group.hunting_prep_done? }
       end
 
       # The map's no-magic tags, in both spellings it carries.
