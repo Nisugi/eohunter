@@ -177,6 +177,11 @@ RSpec.describe EO::Engine::Profile, '#recovery_policy' do
     expect(policy.cleanse_disease).to be(true)
   end
 
+  it "carries the profile's stand_stance, so Cleanse stands as Survival does" do
+    policy = described_class.new({ 'stand_stance' => 'guarded' }).recovery_policy(path: @ecleanse)
+    expect(policy.stand_stance).to eq('guarded')
+  end
+
   it 'lets the hunt override troubadours_rally too' do
     profile = described_class.new({ 'troubadours_rally' => true, 'recovery' => { 'troubadours_rally' => false } })
     expect(profile.recovery_policy(path: @ecleanse).troubadours_rally).to be(false)

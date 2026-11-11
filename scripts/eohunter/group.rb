@@ -2304,11 +2304,17 @@ module EO::Engine
       # @param member [Group::Member] the link to the leader
       # @param travel [#call, nil] (room) -> Trip or Boolean; default a Travel trip
       # @param clock [#now] the time source
-      def initialize(member:, travel: nil, clock: Time)
+      # @param stance [#call, nil] (name) -> Boolean; default Lich's Stance.change
+      # @param stance_at [#call, nil] (name) -> Boolean; default Lich's Stance.at?
+      # @param wander_stance [String, nil] the stance out of a fight; nil keeps it
+      def initialize(member:, travel: nil, clock: Time, stance: nil, stance_at: nil, wander_stance: nil)
         super()
         @member = member
         @travel = travel || EO::Engine::Travel.default
         @clock = clock
+        @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @stance_at = stance_at || ->(name) { ::Lich::Gemstone::Stance.at?(name) }
+        @wander_stance = wander_stance
         @trip = nil
         @independent = false
         @rejoin = false
@@ -2367,6 +2373,7 @@ module EO::Engine
           return false
         end
         return true if @trip
+        return true if stance_due?(world)
 
         !leader_here?(world) || !grouped?(world)
       end
@@ -2384,6 +2391,10 @@ module EO::Engine
           EO::Engine::Travel.step(self, @travel, @trip.place, world)
           return nil
         end
+
+        # Out of a fight, the wander stance: the moment nothing here is
+        # alive, not on the next room (Assist sits above while it fights).
+        @stance.call(@wander_stance) if stance_due?(world)
 
         unless leader_here?(world)
           room = destination
@@ -2423,6 +2434,14 @@ module EO::Engine
       end
 
       private
+
+      # Out of the wander stance with no creature alive here.
+      def stance_due?(world)
+        return false if @wander_stance.nil?
+        return false if Array(world.room.targets).any? { |t| t.status.to_s !~ /dead|gone/ }
+
+        !@stance_at.call(@wander_stance)
+      end
 
       def leader_here?(world)
         leader = @member.leader_name.to_s

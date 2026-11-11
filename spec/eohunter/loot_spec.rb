@@ -239,6 +239,15 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     expect(stances).to be_empty
   end
 
+  it 'goes to the wander stance to loot once nothing here is alive' do
+    wander = described_class.new(policy: policy, targets_policy: EO::Engine::Targets::Policy.new, rest_policy: rest_policy,
+                                 counters: counters, scripts: scripts, stance: ->(s) { stances << s; true }, wander_stance: 'guarded')
+    room.targets = [npc(1, status: 'dead')]
+    wander.wants_control?(world)
+    wander.tick(world)
+    expect(stances).to eq(['guarded'])
+  end
+
   it 'redeems a boost when fried, else counts an overkill once the boosts are spent' do
     me.fxp_pct = 96
     loot.wants_control?(world)

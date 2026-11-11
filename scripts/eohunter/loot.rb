@@ -172,11 +172,12 @@ module EO::Engine
       # @param counters [Rest::Counters]
       # @param scripts [#start, #running?, #kill, #paused?] default Lich's Script
       # @param stance [#call] (name) -> Boolean
+      # @param wander_stance [String, nil] the stance to loot in once nothing is alive
       # @param group [Group::Leader, nil] the leader's: the looter choice and the wait for it
       # @param follower [Boolean] loots only when assigned by a loot order
       # @param clock [#now] the time source, injectable for specs
       def initialize(policy:, targets_policy:, rest_policy: EO::Engine::Rest::Policy.new, counters: EO::Engine::Rest::Counters.new,
-                     scripts: nil, stance: nil, group: nil, follower: false, clock: Time)
+                     scripts: nil, stance: nil, wander_stance: nil, group: nil, follower: false, clock: Time)
         super()
         @policy = policy
         @targets_policy = targets_policy
@@ -184,6 +185,7 @@ module EO::Engine
         @counters = counters
         @scripts = scripts || EO::Engine::Behaviors::Rest::LichScripts
         @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @wander_stance = wander_stance
         @group = group
         @follower = follower
         @assigned = false
@@ -287,6 +289,10 @@ module EO::Engine
         # asking each time costs nothing.
         if @policy.stance && Targets.fightable_count(world.room.targets, @targets_policy).positive?
           @stance.call('defensive')
+        # The fight is over: the wander stance before the first corpse, not
+        # the attack stance until the next room.
+        elsif @wander_stance && Array(world.room.targets).none? { |t| t.status.to_s !~ /dead|gone/ }
+          @stance.call(@wander_stance)
         end
 
         corpse = EO::Engine::Loot::Predicates.deaders(world.room).find { |c| !@looted.include?(c.id.to_s) }

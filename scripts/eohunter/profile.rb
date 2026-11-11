@@ -155,6 +155,7 @@ module EO::Engine
     def recovery_policy(path:, char_settings: {})
       base = Cleanse::Policy.load(path, char_settings: char_settings).to_h
       base[:troubadours_rally] = self['troubadours_rally']
+      base[:stand_stance] = self['stand_stance']
       Cleanse::Policy.new(**base.merge(recovery))
     end
 
