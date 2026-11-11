@@ -628,12 +628,36 @@ RSpec.describe EO::Engine::Behaviors::Rest do
         expect(looter.cancelled).to be true
       end
 
-      it 'skips the loot for a wounded rest or one outside bigshot\'s reasons' do
+      def wounded_rest(*statuses)
         policy.wounded = -> { true }
+        world.room = OpenStruct.new(targets: statuses.map { |st| OpenStruct.new(status: st) })
         with_loot.wants_control?(world)
         with_loot.tick(world)
-        expect(with_loot.phase).to eq(:leave)
+        with_loot.phase
+      end
+
+      it 'loots before a wounded rest when the room is clear' do
+        expect(wounded_rest).to eq(:final_loot)
+        expect(looter.final).to be true
+      end
+
+      it 'loots before a wounded rest when every creature left is muckled, prone or dead' do
+        expect(wounded_rest('stunned', 'webbed', 'dead', 'sleeping', 'prone', 'lying down')).to eq(:final_loot)
+      end
+
+      it 'leaves at once, wounded, while anything here can still fight' do
+        seen = []
+        EO::Engine::Events.on(:final_loot_skipped) { |e| seen << e.data }
+        expect(wounded_rest('stunned', '')).to eq(:leave)
         expect(looter.final).to be false
+        expect(seen).to eq([{ reason: :hostiles_here, count: 1 }])
+      end
+
+      it 'treats a rooted creature as able to fight: it can still attack and cast' do
+        expect(wounded_rest('rooted')).to eq(:leave)
+      end
+
+      it "skips the loot for a rest outside bigshot's reasons" do
         other = loot.new(2)
         forced = described_class.new(policy: policy, travel: ->(_r) { true }, fog: ->(_p, _r) { true }, scripts: scripts, stance: ->(_s) { true }, loot: other)
         policy.wounded = nil

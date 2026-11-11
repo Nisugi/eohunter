@@ -364,6 +364,10 @@ module EO::Engine
       FINAL_LOOT_REASONS = /dread limit|bounty complete|fried|out of mana|encumbered/
       # Ticks the final loot may take before Rest leaves anyway
       FINAL_LOOT_TICKS = 60
+      # A creature status that cannot hurt a wounded group while it loots:
+      # dead or gone, unable to act, or down (it must stand before it can
+      # act). A rooted one can still attack and cast, so it is a threat.
+      HARMLESS = /dead|gone|stunned|sleeping|webbed|frozen|immobilized|held in place|calm|prone|lying/i
       # Seconds between follow_now orders while holding for followers
       REORDER = 10
       # Departure phases are outside the field recovery timeout.
@@ -808,15 +812,28 @@ module EO::Engine
         @stuck = nil
         @any_wounded = @reason.to_s =~ /wounded/ || (grouped? && @group.any_wounded?) ? true : false
         @phase = grouped? ? :wait_followers : :leave
-        # should_rest? 9041: a final loot for these reasons, never wounded
-        # (an ambusher here is Flee's, which outranks Rest; the claim is
-        # Loot's own check)
-        if @loot && @reason.to_s =~ FINAL_LOOT_REASONS && @reason.to_s !~ /wounded/
+        # should_rest? 9041 gives a final loot for these reasons and never
+        # when wounded. A wounded rest here loots too when nothing hostile
+        # in the room can act (each one dead or muckled): the corpses take
+        # seconds, and bigshot's rule left them behind with no one in
+        # danger. Anything able to fight and the group leaves at once. (An ambusher here is Flee's, which
+        # outranks Rest; the claim is Loot's own check.)
+        if @loot && final_loot?(world)
           @loot.final!
           @final_loot_ticks = 0
           @phase = :final_loot
         end
         nil
+      end
+
+      # A final loot for this rest: wounded, only when nothing hostile here
+      # can act (dead, gone or muckled); otherwise for FINAL_LOOT_REASONS.
+      def final_loot?(world)
+        return @reason.to_s.match?(FINAL_LOOT_REASONS) unless @any_wounded
+
+        threats = Array(world.room&.targets).count { |t| t.status.to_s !~ HARMLESS }
+        Events.emit(:final_loot_skipped, reason: :hostiles_here, count: threats) if threats.positive?
+        threats.zero?
       end
 
       # Loot's ticks, from here, until it has nothing left in this room.

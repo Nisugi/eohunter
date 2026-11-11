@@ -32,7 +32,7 @@ module EO::Engine
       movement: %i[travel_started travel_arrived travel_failed travel_suspended entered_room out_of_bounds
                    fog_return tracked uncovered hidden_arrival],
       rest: %i[signs_held signs_wait_expired rest_started resting rested rest_finished rest_destination rest_retry rest_stuck rest_stranded
-               rest_service_failed town_rest_complete final_loot_done overkill loot_script_started loot_stuck],
+               rest_service_failed town_rest_complete final_loot_done final_loot_skipped overkill loot_script_started loot_stuck],
       group: %i[group_checked order followers_ready waiting_for_followers follower_lost loot_assigned hunt_over hunt_ended
                 coordination_return_required],
       recovery: %i[standing pulling fleeing cleansing cleansed cleanse_stuck aid_seen aid_cast aid_cleared died deader disarmed rooted out_of_mana
