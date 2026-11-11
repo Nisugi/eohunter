@@ -630,6 +630,7 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     run
     expect(steps).to eq(['stand', :hands])
     expect(orders.phase).to eq(:idle)
+    expect(hub.acked(:hunting_prep)).to eq(['Bob'])
   end
 
   it 'runs follower resting scripts sequentially' do
@@ -1200,7 +1201,10 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(orders_sent).to eq([:hunting_prep])
     run_until(:rally_out)
     rest.tick(world)
-    expect(rest.phase).to eq(:rally) # everyone present already
+    expect(rest.phase).to eq(:hold) # present, but Bob's hunting prep is not acked
+    hub.ack(:hunting_prep, 'Bob', hunt_id: hub.hunt_id)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rally)
     run_until(:hunting_scripts)
     hub.take_orders('Bob') # the gathers' follow_nows
     rest.tick(world)

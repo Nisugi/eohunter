@@ -1035,6 +1035,22 @@ module EO::Engine
         order(:prepare_move, room: room)
       end
 
+      # The hunting prep, its acks cleared first: each follower acks once
+      # its prep commands have run and its hands are ready.
+      #
+      # @param room [Integer] the room the order is raised in
+      # @return [Order, nil] nil when solo
+      def order_hunting_prep(room)
+        @hub.clear_acks(:hunting_prep)
+        order(:hunting_prep, room: room)
+      end
+
+      # Every online follower has acked the hunting prep: its prep
+      # commands run and its hands ready, so the walk out can start.
+      #
+      # @return [Boolean]
+      def hunting_prep_done? = (online - @hub.acked(:hunting_prep)).empty?
+
       # Whether the group can move: legacy mode checks online followers;
       # strict mode rechecks local ownership and the full episode roster's
       # fresh preparations without consuming the permission.
@@ -2157,6 +2173,9 @@ module EO::Engine
       # the trip, not on arrival. A failure is the loadout_stuck event's.
       def step_hands(world)
         @phase = :idle
+        # Acked even when the hands failed: loadout_stuck has asked for
+        # the rest, and the leader must not hold the walk out for it.
+        @pending_ack = :hunting_prep
         @prepare_hands&.call(world)
       end
 
