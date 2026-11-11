@@ -529,6 +529,13 @@ end
 RSpec.describe EO::Engine::Behaviors::Orders do
   include GroupSpecHelpers
 
+  let(:group_checks) { [] }
+
+  before do
+    checks = group_checks
+    allow_any_instance_of(EO::Engine::Actions::GroupCheck).to receive(:quiet_group) { checks << :group; ['You are grouped with Lead (leading).'] }
+  end
+
   let(:hub) { hub_with('Bob') }
   let(:member) { EO::Engine::Group::Member.new(hub, name: 'Bob', deadline: 0.5) }
   let(:me) { OpenStruct.new(fxp_pct: 50, mana_pct: 80, spirit: 10, stamina_pct: 90, encumbrance_pct: 10, dead?: false, in_rt?: false, in_cast_rt?: false, hidden?: false) }
@@ -622,6 +629,7 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(orders.rest_prep_done).to be false
     run
     expect(scripts.started).to eq([['eloot', nil], ['eherbs', nil]])
+    expect(group_checks).to eq([:group]) # once, setting out
     expect(orders.rest_prep_done).to eq(hub.rest_prep_cycle) # done, for this cycle
     echoed = EO::Engine::Group.report(world, name: 'Bob', rest_policy: policy, counters: EO::Engine::Rest::Counters.new,
                                              rest_prep_done: orders.rest_prep_done)
@@ -1412,6 +1420,17 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     expect(rest.phase).to eq(:hunting_scripts_own)
   end
 
+  it 'checks its group quietly as it sets out, as each follower does' do
+    checks = 0
+    allow_any_instance_of(EO::Engine::Actions::GroupCheck).to receive(:quiet_group) { checks += 1; ['You are leading Bob.'] }
+    rest.start!
+    run_until(:done) { hub.ack(:cast_signs, 'Bob', hunt_id: hub.hunt_id) } # Bob answers any signs order
+    expect(checks).to eq(0)
+    rest.tick(world)
+    expect(rest.phase).to eq(:hunting)
+    expect(checks).to eq(1)
+  end
+
   it 're-orders follow_now every ten seconds while holding, unhiding first' do
     me.mana_pct = 10
     rest.wants_control?(world)
@@ -1756,6 +1775,35 @@ RSpec.describe EO::Engine::Group::Leader do
 
     expect(alive).to be true
     expect(calls).to be > 1
+  end
+end
+
+RSpec.describe EO::Engine::Actions::GroupCheck do
+  let(:me) { OpenStruct.new(dead?: false, in_rt?: false, in_cast_rt?: false) }
+  let(:world) { OpenStruct.new(me: me, group_nouns: %w[Lead Ann Bob]) }
+
+  def check(answer)
+    action = described_class.new(world)
+    allow(action).to receive(:settle_rt)
+    allow(action).to receive(:quiet_group).and_return(answer)
+    action.call
+  end
+
+  it 'sends a quiet GROUP and reports the members Lich now knows' do
+    seen = []
+    EO::Engine::Events.on(:group_checked) { |e| seen << e.data }
+    expect(check(['You are grouped with Lead (leading), Ann, and Bob.']).reason).to eq(:group_checked)
+    expect(seen).to eq([{ members: %w[Lead Ann Bob] }])
+  end
+
+  it 'fails quietly when the game never answers' do
+    expect(check(nil).reason).to eq(:no_answer)
+  end
+
+  it "matches the game's answers, in a group and out of one" do
+    re = described_class::ANSWER
+    ['You are grouped with Nisugi (leading), Monstr, Sugiin, and Zoleta.', 'You are leading Dicate, Monstr, Sugiin, and Zoleta.',
+     'You are not currently in a group.'].each { |l| expect(l).to match(re) }
   end
 end
 

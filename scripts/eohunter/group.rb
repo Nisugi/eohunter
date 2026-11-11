@@ -1712,6 +1712,34 @@ module EO::Engine
       def perform = send_and_match('group open', ANSWER, timeout: 3)
     end
 
+    # A quiet GROUP, so Lich's Group knows every member. A follower's
+    # Group only learns of members who join after it does: one that joined
+    # last knew only the leader, and every group check that reads Lich's
+    # list missed the rest (on 2026-11-10 no follower saw Monstr stunned).
+    # The answer lists them all, and Lich's parser reads it before the
+    # quiet hook hides it, so nothing shows in the game window.
+    class GroupCheck < Base
+      # The game's answer to GROUP, in a group or out of one.
+      ANSWER = /You are (?:leading|grouped with|not (?:currently )?in a group)|Your group status/
+
+      # @return [Symbol] :ok or :dead
+      def preconditions = me.dead? ? :dead : :ok
+
+      # @return [Actions::Result] success with :group_checked, failed with :no_answer
+      def perform
+        lines = Array(quiet_group)
+        return Result.new(status: :failed, reason: :no_answer) if lines.empty?
+
+        Events.emit(:group_checked, members: @world.group_nouns)
+        Result.new(status: :success, reason: :group_checked)
+      end
+
+      # The seam to Lich's quiet command, stubbed in specs.
+      #
+      # @return [Array<String>, nil] the answer's lines
+      def quiet_group = ::Lich::Util.quiet_command_xml('group', ANSWER)
+    end
+
     # DISBAND GROUP for independent travel.
     #
     # @bigshot disband group
@@ -2149,7 +2177,10 @@ module EO::Engine
           @stance.call(@policy.wander_stance) if @policy.wander_stance
           Actions::Result.new(status: :success)
         when :hunting_prep then prep(@policy.hunting_prep_command_list, [], wait_for_scripts: true)
-        when :hunting_scripts_start then prep([], @policy.hunting_script_list)
+        when :hunting_scripts_start
+          # Setting out: every member checks its group first (GroupCheck).
+          Actions::GroupCheck.new(world).call
+          prep([], @policy.hunting_script_list)
         when :hunting_scripts_stop
           stop_hunting(world)
           Actions::Result.new(status: :success)

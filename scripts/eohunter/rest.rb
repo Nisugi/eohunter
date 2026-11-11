@@ -1358,6 +1358,9 @@ module EO::Engine
         @phase = :hunting
         @reason = nil
         select_site(:town)
+        # Setting out: the leader checks its group as every follower does
+        # on hunting_scripts_start (GroupCheck).
+        Actions::GroupCheck.new(world).call if world && grouped?
         return nil unless @policy.sneaky && world
 
         Actions::Command.new(world, command: 'movement autosneak on').call
