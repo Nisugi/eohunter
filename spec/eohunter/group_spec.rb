@@ -767,6 +767,73 @@ RSpec.describe EO::Engine::Behaviors::Follow do
     expect(trips).to eq([9])
   end
 
+  describe 'while the leader rests' do
+    before do
+      hub.heartbeat!(name: 'Lead', room: 17_589, phase: :resting)
+      member.leader_state
+      room.players = []
+    end
+
+    it 'waits in the resting room rather than chasing the leader' do
+      room.id = 100
+      expect(follow.wants_control?(world)).to be false
+    end
+
+    it 'goes to the resting room, not to the leader, from anywhere else' do
+      room.id = 50
+      expect(follow.wants_control?(world)).to be true
+      follow.tick(world)
+      expect(trips).to eq([100])
+    end
+
+    it 'lets the trip that parked it finish go2 cleanup before it settles' do
+      trip = Class.new do
+        attr_accessor :done
+        attr_reader :cancelled
+
+        def place = 100
+        def tick(_w) = done ? EO::Engine::Actions::Result.new(status: :success, reason: :arrived) : nil
+        def cancel! = @cancelled = true
+      end.new
+      parking = described_class.new(member: member, travel: ->(_r) { trip })
+      room.id = 50
+      parking.tick(world)
+      room.id = 100 # arrived; go2 is still putting gear away
+      expect(parking.wants_control?(world)).to be true
+      expect(parking.tick(world)).to be_nil
+      expect(trip.cancelled).to be_nil
+      trip.done = true
+      parking.tick(world)
+      expect(parking.wants_control?(world)).to be false
+      expect(trip.cancelled).to be_nil
+    end
+
+    it 'goes to the leader again when a follow_now calls it back' do
+      room.id = 100
+      follow.rejoin!
+      expect(follow.wants_control?(world)).to be true
+      follow.tick(world)
+      expect(trips).to eq([17_589])
+    end
+
+    it 'gives up a call-back it cannot walk, and goes back to waiting' do
+      room.id = 100
+      stuck = described_class.new(member: member, travel: ->(_r) { false })
+      stuck.rejoin!
+      5.times { stuck.tick(world) if stuck.wants_control?(world) }
+      expect(stuck.wants_control?(world)).to be false
+    end
+
+    it 'forgets an old call-back once the leader has been here' do
+      room.id = 100
+      follow.rejoin!
+      room.players = [player('Lead')]
+      follow.wants_control?(world)
+      room.players = []
+      expect(follow.wants_control?(world)).to be false
+    end
+  end
+
   it 'does not backtrack to a stale leader room when group movement completes during its room read' do
     hub.heartbeat!(name: 'Lead', room: 32763, phase: :hunting)
     member.leader_state
@@ -915,6 +982,31 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.tick(world)).to be_nil
     fight[0] = true
     expect(muster.wants_control?(world)).to be false
+  end
+
+  it 'holds while a group member is on the ground, and not for a dead one' do
+    room.players = [player('Bob', status: 'lying down')]
+    expect(muster.wants_control?(world)).to be true
+    expect(muster.reason).to eq(:member_down)
+    expect(muster.tick(world)).to be_nil
+    room.players = [player('Bob', status: 'dead')]
+    muster.wants_control?(world)
+    expect(muster.reason).not_to eq(:member_down)
+  end
+
+  it 'does not report cast roundtime as roundtime' do
+    policy = EO::Engine::Rest::Policy.new
+    casting = OpenStruct.new(in_rt?: false, in_cast_rt?: true, encumbrance_pct: 0, hidden?: false, dead?: false, fxp_pct: 0, mana_pct: 100,
+                             spirit: 10, stamina_pct: 100)
+    casting.define_singleton_method(:debuff_level) { |_n| nil }
+    casting.define_singleton_method(:debuff_active?) { |_n| false }
+    built = EO::Engine::Group.report(OpenStruct.new(me: casting, room: room), name: 'Bob', rest_policy: policy,
+                                     counters: EO::Engine::Rest::Counters.new)
+    expect(built.rt).to be false
+    casting.define_singleton_method(:in_rt?) { true }
+    built = EO::Engine::Group.report(OpenStruct.new(me: casting, room: room), name: 'Bob', rest_policy: policy,
+                                     counters: EO::Engine::Rest::Counters.new)
+    expect(built.rt).to be true
   end
 
   it 'holds between fights until every follower is out of roundtime' do
@@ -1149,6 +1241,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     rest.tick(world)
     expect(rest.phase).to eq(:resting_prep_own)
     run_until(:rested)
+    room.id = policy.resting_room
     hub.report('Bob', report('Bob', rest_prep_done: false))
     rest.tick(world)
     expect(orders_sent).to eq(%i[resting_prep resting_scripts_start follow_now])
@@ -1167,6 +1260,27 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     rest.tick(world)
     expect(orders_sent).to eq(%i[resting_prep resting_scripts_start])
     expect(rest.phase).to eq(:resting_prep_own)
+  end
+
+  it 'gathers only after the resting scripts end and the leader is back at the resting room' do
+    me.mana_pct = 10
+    rest.wants_control?(world)
+    run_until(:rested)
+    allow(scripts).to receive(:running?).and_return(true)
+    allow(policy).to receive(:resting_script_list).and_return(['sell'])
+    room.id = 77
+    hub.take_orders('Bob')
+    rest.tick(world)
+    expect(rest.phase).to eq(:rested)
+    expect(orders_sent).to eq([])
+    allow(scripts).to receive(:running?).and_return(false)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rest_return)
+    rest.tick(world)
+    expect(rest.phase).to eq(:rested)
+    room.id = policy.resting_room
+    rest.tick(world)
+    expect(rest.phase).to eq(:hold)
   end
 
   it 'holds the rest until every follower is ready too' do
