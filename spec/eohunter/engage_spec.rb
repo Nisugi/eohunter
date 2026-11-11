@@ -91,6 +91,33 @@ RSpec.describe EO::Engine::Engage::Conditions do
     expect(blocked('barrage (buff30)')).to be_nil
     me.define_singleton_method(:buff_time_left) { |_n| 5.0 }
     expect(blocked('barrage (buff30)')).to eq('buff30')
+    active_fx = true
+    %i[spell_effect_active? cooldown_active? debuff_active?].each { |m| me.define_singleton_method(m) { |_p| active_fx } }
+    left = 90.0
+    me.define_singleton_method(:effect_seconds_left) { |_k, _p| left }
+    %w[ES EC ED].each do |kind|
+      left = 90.0
+      expect(blocked(%(attack (#{kind}30"Thing")))).to be_nil
+      expect(blocked(%(attack (!#{kind}30"Thing")))).to eq(%(!#{kind}30"Thing"))
+      left = 5.0
+      expect(blocked(%(attack (#{kind}30"Thing")))).to eq(%(#{kind}30"Thing"))
+      expect(blocked(%(attack (!#{kind}30"Thing")))).to be_nil
+    end
+    active_fx = false
+    expect(blocked('attack (ES30"Thing")')).to eq('ES30"Thing"')
+    expect(blocked('attack (!ES30"Thing")')).to be_nil
+    me.define_singleton_method(:spell_effect_active?) { |_p| false }
+    me.define_singleton_method(:cooldown_active?) { |_p| false }
+    me.define_singleton_method(:debuff_active?) { |_n| false }
+    me.define_singleton_method(:lich_spell_seconds_left) { |n| n == 'Briar Betrayer' ? @briar : nil }
+    me.instance_variable_set(:@briar, nil)
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to be_nil
+    me.instance_variable_set(:@briar, 90.0)
+    expect(blocked('script volley(!EB"Briar Betrayer")')).to eq('!EB"Briar Betrayer"')
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to eq('!EB7"Briar Betrayer"')
+    me.instance_variable_set(:@briar, 5.0)
+    expect(blocked('script volley(!EB7"Briar Betrayer")')).to be_nil
+    expect(blocked('script volley(!EB"Briar Betrayer")')).to eq('!EB"Briar Betrayer"')
     expect(blocked('attack (EB"Enh. Dex")')).to be_nil
     expect(blocked('attack (!EB"Enh. Dex")')).to eq('!EB"Enh. Dex"')
   end
@@ -533,12 +560,13 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     me.current_target_id = '1'
     engage.tick(world)
     expect(calls.last).to eq([:cast, { spell: 1030, extra: nil, incant: false, target: '1' }])
-    # the once line is registered, so the third tick wraps to attack and the fourth skips it
+    # the once line is registered, so the third tick wraps to attack and the
+    # fourth passes over it to attack again, without losing a tick to it
     engage.tick(world)
-    skipped = engage.tick(world)
-    expect(skipped.reason).to eq(:condition)
-    expect(skipped.status).to eq(:skipped)
-    expect(skipped.failed?).to be(false)
+    casts = calls.count { |c| c.first == :cast }
+    engage.tick(world)
+    expect(calls.last.first).to eq(:attack)
+    expect(calls.count { |c| c.first == :cast }).to eq(casts)
   end
 
   # bigshot spell_is_selfcast? 5785: only 506/902/411 were handled, so a
@@ -598,6 +626,16 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(calls.none? { |tag, _| tag == :cast }).to be(true)
   end
 
+  it 'leaves the stance alone for kweed, and not for weed' do
+    spells[610] = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 10, name: 'Tangleweed')
+    me.current_target_id = '1'
+    engage.instance_variable_set(:@target, world.room.targets.first)
+    engage.send(:run_line, world, EO::Engine::Engage::Routine.parse(['kweed']).first)
+    expect(stances).to eq([])
+    engage.send(:run_line, world, EO::Engine::Engage::Routine.parse(['weed']).first)
+    expect(stances).to eq(['defensive'])
+  end
+
   it 'casts kweed as an evoked 610 unless a weed is already down' do
     policy.routines['a'] = ['kweed(buff5)']
     spells[610] = OpenStruct.new(known?: true, affordable?: true, active?: false, mana_cost: 10, name: 'Tangleweed')
@@ -644,6 +682,116 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(EO::Engine::Actions::Wrack).to receive(:new).with(world, policy: have_attributes(wracking_spirit: 9))
                                                        .and_return(instance_double(EO::Engine::Actions::Wrack, call: EO::Engine::Actions::Result.new(status: :failed, reason: :no_wrack)))
     expect(hunter.tick(world).reason).to eq(:out_of_mana)
+  end
+
+  it 'moves on at once when the creature left before the TARGET landed, learning nothing' do
+    left = EO::Engine::Actions::Result.new(status: :failed, reason: :target_left, line: 'Usage:  TARGET {player|creature|hazard}')
+    allow(EO::Engine::Actions::Target).to receive(:new).and_return(instance_double(EO::Engine::Actions::Target, call: left))
+    expect(engage.tick(world).reason).to eq(:target_gone)
+    expect(tp.untargetable_set).to be_empty
+    expect(engage.target).to be_nil
+  end
+
+  it 'reads the usage block and the no-target line as the answer to TARGET' do
+    allow(EO::Engine::Actions::Target).to receive(:new).and_call_original
+    ['Usage:  TARGET {player|creature|hazard}', 'You do not have a target.'].each do |line|
+      action = EO::Engine::Actions::Target.new(world, target: OpenStruct.new(id: '1', status: nil))
+      allow(action).to receive(:send_and_match) do |_cmd, answers, **|
+        expect(line).to match(answers)
+        EO::Engine::Actions::Result.new(status: :success, line: line)
+      end
+      expect(action.send(:perform).reason).to eq(:target_left)
+    end
+  end
+
+  describe 'lines whose condition is not met' do
+    def routine_of(*texts)
+      engage.instance_variable_set(:@routine, texts.map { |t| EO::Engine::Engage::Routine.parse(t).first })
+      engage.instance_variable_set(:@cursor, 0)
+    end
+
+    before do
+      engage.instance_variable_set(:@target, world.room.targets.first)
+      allow(engage).to receive(:next_target).and_return(world.room.targets.first)
+      allow(engage).to receive(:ensure_targeted).and_return(nil)
+    end
+
+    it 'runs the next line in the same tick' do
+      routine_of('first', 'second', 'third')
+      allow(EO::Engine::Engage::Conditions).to receive(:blocked_by) { |line, *| line.text == 'second' ? nil : 'nope' }
+      ran = []
+      allow(engage).to receive(:dispatch) { |_w, text, _l| ran << text; EO::Engine::Actions::Result.new(status: :success) }
+      expect(engage.tick(world)).to be_success
+      expect(ran).to eq(['second'])
+      expect(engage.instance_variable_get(:@cursor)).to eq(2)
+    end
+
+    it 'stops after one lap when nothing can run' do
+      routine_of('first', 'second')
+      allow(EO::Engine::Engage::Conditions).to receive(:blocked_by).and_return('nope')
+      expect(EO::Engine::Engage::Conditions).to receive(:blocked_by).twice
+      expect(engage.tick(world).reason).to eq(:condition)
+      expect(engage.instance_variable_get(:@cursor)).to eq(0)
+    end
+  end
+
+  describe 'turbo' do
+    let(:sent) { [] }
+    let(:quick_stances) { [] }
+
+    before do
+      policy.turbo = true
+      engage.instance_variable_set(:@turbo_send, ->(c) { sent << c })
+      engage.instance_variable_set(:@turbo_stance, ->(s) { quick_stances << s })
+    end
+
+    it 'sends TARGET without waiting, then the stance and the line in the same tick' do
+      expect(EO::Engine::Actions::Target).not_to receive(:new)
+      engage.tick(world)
+      expect(sent).to eq(['target #1'])
+      expect(quick_stances).to eq(['defensive'])
+      expect(calls.map(&:first)).to eq([:attack])
+    end
+
+    it 'with stance, confirms TARGET and batches only stance and command' do
+      policy.turbo = 'stance'
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(calls.map(&:first)).to eq(%i[target attack])
+      expect(quick_stances).to eq(['defensive'])
+    end
+
+    it 'with off, or nothing set, waits for everything' do
+      ['off', nil, false].each do |value|
+        policy.turbo = value
+        expect(policy.turbo_mode).to be_nil
+      end
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(quick_stances).to eq([])
+    end
+
+    it 'reads the profile word' do
+      expect(EO::Engine::Profile.new({ 'turbo' => 'stance' }).engage_policy.turbo_mode).to eq(:stance)
+      expect(EO::Engine::Profile.new({ 'turbo' => true }).engage_policy.turbo_mode).to eq(:all)
+      expect(EO::Engine::Profile.new({}).engage_policy.turbo_mode).to be_nil
+    end
+
+    it 'waits for answers as usual in roundtime' do
+      me.define_singleton_method(:in_rt?) { true }
+      engage.tick(world)
+      expect(sent).to eq([])
+      expect(calls.first.first).to eq(:target)
+    end
+
+    it 'probes properly when the TARGET did not land' do
+      engage.tick(world)
+      engage.instance_variable_set(:@turbo_sent_at, Time.now - 5)
+      allow(engage.instance_variable_get(:@clock)).to receive(:now).and_return(Time.now)
+      engage.tick(world)
+      expect(calls.map(&:first)).to include(:target)
+      expect(engage.instance_variable_get(:@turbo_sent_at)).to be_nil
+    end
   end
 
   it 'learns an untargetable name from the probe and moves on' do

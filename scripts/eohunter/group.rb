@@ -276,7 +276,7 @@ module EO::Engine
       me = world.me
       overweight = encumbrance&.ready?(me.encumbrance_pct, threshold: rest_policy.encumbered_pct, looting: looting)
       Report.new(
-        name: name, room: world.room.id, rt: me.in_rt? || me.in_cast_rt?, hidden: me.hidden?, sneaky: sneaky,
+        name: name, room: world.room.id, rt: me.in_rt?, hidden: me.hidden?, sneaky: sneaky,
         looting: looting, rest_prep_done: rest_prep_done,
         rest_reason: Rest::Predicates.rest_reason(me, rest_policy, counters, forced: forced, looting: looting, encumbered: overweight),
         not_hunting_reason: Rest::Predicates.not_hunting_reason(me, rest_policy),
@@ -1149,7 +1149,9 @@ module EO::Engine
       def looting_done? = reports.values.none?(&:looting)
 
       # Movement would be refused during roundtime anyway; the barrier
-      # saves the sends anyone would otherwise burn discovering that.
+      # saves the sends anyone would otherwise burn discovering that. Cast
+      # roundtime does not stop anyone walking, so it is not reported
+      # (bigshot's rt? is checkrt, without the cast half).
       # @bigshot Bigshot::Group
       # @return [Boolean] true when any online follower is in roundtime
       def roundtime? = reports.values.any?(&:rt)
@@ -1160,6 +1162,23 @@ module EO::Engine
       # @return [Boolean] true when every online follower's rest prep has run
       #   for the current :resting_prep cycle (a bare true, from a follower
       #   whose order named no cycle, is taken at its word)
+      def signs_complete? = (online - @hub.acked(:cast_signs)).empty?
+
+      # Ask the followers for signs, forgetting the last order's answers. An
+      # idle report says nothing about this order, so readiness is its ack
+      # (the Report is the wire format and cannot grow a field for it).
+      #
+      # @param room [Integer] the leader's room
+      # @return [void]
+      def order_signs(room)
+        @hub.clear_acks(:cast_signs)
+        order(:cast_signs, room: room)
+      end
+
+      # Every follower has run its own resting commands and scripts, for
+      # this cycle.
+      #
+      # @return [Boolean]
       def rest_prep_complete?
         cycle = @hub.rest_prep_cycle
         reports.values.all? do |r|
@@ -1760,7 +1779,7 @@ module EO::Engine
       REORDER = 10
 
       # Why the hold, from the last wants_control?: :member_stunned,
-      # :member_roundtime, :follower_missing, :followers_looting,
+      # :member_down, :member_roundtime, :follower_missing, :followers_looting,
       # :prepare_movement or :movement_barrier; nil when not holding.
       #
       # @return [Symbol, nil]
@@ -1788,8 +1807,8 @@ module EO::Engine
       def priority = strict_movement? ? 45 : 15
 
       # Reports newly lost followers, then decides whether to hold: not
-      # when solo, resting or fighting; else for a stunned or roundtimed
-      # member, a missing follower, or the movement barrier.
+      # when solo, resting or fighting; else for a stunned, downed or
+      # roundtimed member (Survival, above us, pulls a downed one up), a missing follower, or the movement barrier.
       #
       # @param world [World]
       # @return [Boolean] true when there is a reason to hold
@@ -1809,6 +1828,7 @@ module EO::Engine
         reset_movement(world.room.id) if @movement_room != world.room.id
 
         @reason = if EO::Engine::Survival::Predicates.group_member_stunned?(world) then :member_stunned
+                  elsif EO::Engine::Survival::Predicates.group_member_down?(world) then :member_down
                   elsif @leader.roundtime? then :member_roundtime
                   elsif !@leader.all_present?(world) then :follower_missing
                   elsif strict_movement? then strict_reason(world)
@@ -1830,7 +1850,7 @@ module EO::Engine
       # @param world [World]
       # @return [Actions::Result, nil] the step's result, nil when only waiting
       def tick(world)
-        return nil if %i[member_stunned member_roundtime followers_looting].include?(@reason)
+        return nil if %i[member_stunned member_down member_roundtime followers_looting].include?(@reason)
         if @reason == :prepare_movement
           if strict_movement?
             return nil unless @leader.prepare_movement(world.room.id, room_epoch: world.room.count)
@@ -1891,6 +1911,19 @@ module EO::Engine
       #   under a leader whose order named none
       attr_reader :rest_prep_done
 
+      # Answer a :cast_signs order, once the leader's signs flag has reached
+      # us and Maintain has nothing due. Before the flag Maintain is held, so
+      # nothing due would mean nothing.
+      #
+      # @param idle [#call] -> Boolean, Maintain has nothing to cast
+      # @return [void]
+      def answer_signs(idle)
+        return unless @signs_ordered && @member.leader_signs_wanted? && idle.call
+
+        @signs_ordered = false
+        @member.ack(:cast_signs)
+      end
+
       # @param member [Group::Member]
       # @param policy [Rest::Policy] the follower's own rest settings
       # @param counters [Rest::Counters] the follower's rest counters
@@ -1947,8 +1980,9 @@ module EO::Engine
       # @return [Boolean] true while the leader's phase is :resting
       def resting? = @member.leader_phase == :resting
 
-      # What Maintain gates on: the leader is at the hunting room, so
-      # signs are wanted. Held for the refuge and both walks.
+      # What Maintain gates on: the leader is casting its own signs after
+      # the rally gather, or is at the hunting room, so signs are wanted.
+      # Held for the refuge and both walks.
       # @return [Boolean]
       def signs_wanted? = @member.leader_signs_wanted?
 
@@ -2027,7 +2061,9 @@ module EO::Engine
       def tick(world)
         return step(world) unless @phase == :idle
         if @pending_ack
-          return nil if world.me.in_rt? || world.me.in_cast_rt?
+          # Roundtime only: the leader's barrier waits on this ack, and cast
+          # roundtime does not stop anyone walking.
+          return nil if world.me.in_rt?
 
           type = @pending_ack
           @pending_ack = nil
@@ -2094,7 +2130,10 @@ module EO::Engine
         when :hunting_scripts_stop
           stop_hunting(world)
           Actions::Result.new(status: :success)
-        when :cast_signs then nil # Maintain casts what is due
+        when :cast_signs
+          # Maintain casts what is due; answer_signs says when it is done.
+          @signs_ordered = true
+          nil
         when :check_sneaky then @sneaky && !world.me.hidden? ? Actions::Hide.new(world).call : nil
         when :go2_rally then travel(Array(rooms[:rally]))
         when :go2_hunting_room then room(rooms[:hunting])
@@ -2302,13 +2341,24 @@ module EO::Engine
       # @return [Boolean] true
       def independent! = @independent = true
 
-      # Not while independent; always mid-trip; else when the leader is
-      # not here or we are not in the group.
+      # Not while independent, or parked in the resting room while the
+      # leader rests; always mid-trip; else when the leader is not here or
+      # we are not in the group.
       #
       # @param world [World]
       # @return [Boolean]
       def wants_control?(world)
         return false if @independent
+
+        @rejoin = false if leader_here?(world)
+        if parked?(world)
+          # A trip that brought us here may still have go2 restoring its
+          # travel equipment: tick takes it to the end, as on any arrival.
+          return true if @trip && @trip.place.to_s == world.room.id.to_s
+
+          cancel! if @trip
+          return false
+        end
         return true if @trip
 
         !leader_here?(world) || !grouped?(world)
@@ -2323,9 +2373,14 @@ module EO::Engine
         if world.me.in_rt? || world.me.in_cast_rt?
           return Actions::Result.new(status: :skipped, reason: :roundtime)
         end
+        if @trip && parked?(world)
+          EO::Engine::Travel.step(self, @travel, @trip.place, world)
+          return nil
+        end
 
         unless leader_here?(world)
-          room = @member.leader_room
+          room = destination
+          cancel! if @trip && @trip.place.to_s != room.to_s
           current_room = world.room.id
           # Native map resolution can yield while group movement fills the
           # new room's PC list. Recheck presence after that read before using
@@ -2337,7 +2392,12 @@ module EO::Engine
             case EO::Engine::Travel.step(self, @travel, room, world)
             when :underway then return nil
             when :arrived then return Actions::Result.new(status: :success, reason: :arrived)
-            else return Actions::Result.new(status: :failed, reason: :could_not_reach)
+            else
+              # A call-back to a leader we cannot walk to, during its rest:
+              # back to the resting room rather than failing until the
+              # watchdog stops this follower.
+              @rejoin = false if @member.leader_phase == :resting
+              return Actions::Result.new(status: :failed, reason: :could_not_reach)
             end
           end
         end
@@ -2365,6 +2425,22 @@ module EO::Engine
       def grouped?(world)
         leader = @member.leader_name.to_s
         world.group_leader_noun.to_s == leader || world.group_nouns.include?(leader)
+      end
+
+      # While the leader rests it may go where a follower cannot walk (a
+      # town across the water to sell). Unless a follow_now calls us back,
+      # the resting room is where to wait, not wherever the leader went.
+      def resting_room
+        return nil if @rejoin || @member.leader_phase != :resting
+
+        (@member.rooms || {})[:resting]
+      end
+
+      def destination = resting_room || @member.leader_room
+
+      def parked?(world)
+        room = resting_room
+        !room.nil? && room.to_s == world.room.id.to_s && !leader_here?(world)
       end
     end
   end

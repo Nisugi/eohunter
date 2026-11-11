@@ -156,6 +156,75 @@ RSpec.describe EO::Engine::Behaviors::Rest do
     raise "never reached #{phase}, at #{rest.phase}"
   end
 
+  # bigshot pre_hunt: prepare_for_movement() casts the signs after the
+  # gather at the last rally room, before the hunting scripts and the
+  # goto. Rest outranks Maintain and holds control for the whole
+  # departure, so the cast has to be Rest's own step or it lands on the
+  # first hunting tick, in the hunting room.
+  describe 'the signs step' do
+    let(:casts) { [] }
+    let(:due) { [] }
+
+    before do
+      rest.cast_signs = lambda do |_w|
+        next nil if due.empty?
+
+        casts << [due.shift, trips.dup]
+        EO::Engine::Actions::Result.new(status: :success, reason: :cast)
+      end
+    end
+
+    it 'casts at the rally room, one a tick, before the trip to the hunting room' do
+      due.concat(%w[401 406])
+      rest.start!
+      run_until(:signs)
+      expect(trips).to eq([3]) # the rally room, nothing further
+      expect(rest.signs_phase?).to be true
+      rest.tick(world)
+      rest.tick(world)
+      expect(casts.map(&:first)).to eq(%w[401 406])
+      expect(casts.map(&:last)).to all(eq([3]))
+      expect(rest.phase).to eq(:signs)
+      rest.tick(world)
+      expect(rest.phase).to eq(:hunting_scripts_own)
+      run_until(:done)
+      expect(trips).to eq([3, 200])
+    end
+
+    it 'casts where we stand when there is no rally room, before heading out' do
+      policy.rally_rooms = []
+      due << '401'
+      rest.start!
+      run_until(:hunting_scripts_own)
+      expect(casts).to eq([['401', []]])
+      run_until(:done)
+      expect(trips).to eq([200])
+    end
+
+    it 'does not cast in a room the map tags no-magic, and moves on' do
+      world.room = OpenStruct.new(id: 3, tags: ['meta:nomagic'])
+      due << '401'
+      rest.start!
+      run_until(:hunting_scripts_own)
+      expect(casts).to be_empty
+      expect(due).to eq(['401']) # still due; the arrival cast takes it
+    end
+
+    it 'moves straight on when nothing is due' do
+      rest.start!
+      run_until(:hunting_scripts_own)
+      expect(casts).to be_empty
+    end
+
+    it 'holds signs for the rally trip and wants them in the step' do
+      rest.start!
+      run_until(:rally)
+      expect(rest.signs_phase?).to be false
+      run_until(:signs)
+      expect(rest.signs_phase?).to be true
+    end
+  end
+
   # begin_rest clears the forced reason on the way in, so a rest! that
   # lands after that point - :rest_stuck on the way home, :too_many_items
   # or :loot_stuck during the final loot, :cleanse_stuck while Cleanse
