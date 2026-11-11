@@ -239,6 +239,15 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     expect(stances).to be_empty
   end
 
+  it 'goes to the wander stance to loot once nothing here is alive' do
+    wander = described_class.new(policy: policy, targets_policy: EO::Engine::Targets::Policy.new, rest_policy: rest_policy,
+                                 counters: counters, scripts: scripts, stance: ->(s) { stances << s; true }, wander_stance: 'guarded')
+    room.targets = [npc(1, status: 'dead')]
+    wander.wants_control?(world)
+    wander.tick(world)
+    expect(stances).to eq(['guarded'])
+  end
+
   it 'redeems a boost when fried, else counts an overkill once the boosts are spent' do
     me.fxp_pct = 96
     loot.wants_control?(world)
@@ -262,6 +271,9 @@ RSpec.describe EO::Engine::Behaviors::Loot do
         def solo? = false
         def looting_done? = true
         def looter(*) = @looter
+        def final_looter(*) = @final || @looter
+        attr_writer :final
+
         def order(type, payload = nil, room:) = @orders << [type, payload, room]
       end
     end
@@ -296,6 +308,21 @@ RSpec.describe EO::Engine::Behaviors::Loot do
       expect(sent).to eq(['loot #1', 'loot #1', 'loot #1', 'loot room'])
       expect(counters.lte_boosts).to eq(1)
       expect(counters.overkill).to eq(0)
+    end
+
+    it 'hands the final loot of the floor to the final looter and does not loot it again' do
+      group = group_class.new('Lead', 'Lead')
+      group.final = 'Bob'
+      policy.final = true
+      room.creatures.clear
+      room.loot = [OpenStruct.new(id: '7', name: 'gem', noun: 'gem', type: 'gem')]
+      leader = described_class.new(policy: policy, targets_policy: EO::Engine::Targets::Policy.new, rest_policy: rest_policy,
+                                   counters: counters, scripts: scripts, group: group, stance: ->(_s) { true })
+      expect(leader.wants_control?(world)).to be true
+      expect(leader.tick(world).reason).to eq(:loot_assigned)
+      expect(group.orders).to eq([[:prep_rest, nil, 1], [:loot, 'Bob', 1]])
+      expect(sent).to be_empty
+      expect(leader.wants_control?(world)).to be false
     end
 
     it 'counts nothing on the assigned follower, whose count is the order from the leader' do
@@ -342,7 +369,6 @@ RSpec.describe EO::Engine::Behaviors::Loot do
     it 'is killed when another behavior takes the tick' do
       loot.preempted!(world)
       expect(scripts.killed).to eq(['eloot'])
-      expect(loot.wants_control?(world)).to be false
     end
 
     it 'is killed when the engine stops' do
@@ -350,11 +376,16 @@ RSpec.describe EO::Engine::Behaviors::Loot do
       expect(scripts.killed).to eq(['eloot'])
     end
 
-    it 'takes its corpses as done, the way a finished script does' do
+    it 'leaves its corpses for the next run, so an interruption costs no loot' do
       loot.preempted!(world)
-      # the corpse it was started for is not looted a second time
+      expect(loot.wants_control?(world)).to be true
+      expect(loot.tick(world).reason).to eq(:script_started)
+      expect(scripts.started.length).to eq(2)
+    end
+
+    it 'takes its corpses as done when the engine stops' do
+      loot.cancel!
       expect(loot.wants_control?(world)).to be false
-      expect(scripts.started.length).to eq(1)
     end
 
     it 'kills nothing when no script is running' do

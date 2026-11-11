@@ -45,6 +45,8 @@ module EO::Engine
     #   @return [Boolean] the group runs a deader for a fallen member
     # @!attribute looter
     #   @return [String, nil] the named looter, matched case-insensitively
+    # @!attribute final_looter
+    #   @return [String, nil] who does the final loot; nil picks as looter does
     # @!attribute quiet_followers
     #   @return [Boolean] followers keep their output quiet
     # @!attribute never_loot
@@ -54,9 +56,9 @@ module EO::Engine
     # @!attribute fried_trigger
     #   @return [Array<String>] "any", "all", or the names whose frying rests the group
     Policy = Struct.new(:independent_travel, :independent_return, :group_deader, :looter, :quiet_followers,
-                        :never_loot, :random_loot, :fried_trigger, keyword_init: true) do
+                        :never_loot, :random_loot, :fried_trigger, :final_looter, keyword_init: true) do
       def initialize(independent_travel: false, independent_return: false, group_deader: false, looter: nil,
-                     quiet_followers: true, never_loot: [], random_loot: false, fried_trigger: ['any']) = super
+                     quiet_followers: true, never_loot: [], random_loot: false, fried_trigger: ['any'], final_looter: nil) = super
 
       # The never_loot setting as strings, whatever the profile gave.
       #
@@ -1267,6 +1269,20 @@ module EO::Engine
         @looter = eligible.include?(@name) ? @name : eligible.sample
       end
 
+      # The final loot's looter: final_looter when online and not on
+      # never_loot, else the same choice as a corpse (looter).
+      #
+      # @param me_left [Integer] the leader's own free encumbrance
+      # @return [String, nil] the chosen looter's name, also published from here on
+      def final_looter(me_left: 0)
+        named = @policy.final_looter.to_s
+        unless solo? || named.empty?
+          found = (online + [@name]).find { |n| n.to_s.casecmp(named).zero? }
+          return @looter = found if found && !@policy.never_loot_list.include?(found)
+        end
+        looter(me_left: me_left)
+      end
+
       # The unacknowledged shutdown: hunt_over to everyone, the Hub marked
       # finished, an exit record with no ack wait. end_hunt is the one
       # that waits.
@@ -1833,11 +1849,14 @@ module EO::Engine
       # @param resting [#call] -> Boolean, true while the leader is resting
       # @param fight [#call] (world) -> Boolean, true while a fight is on
       # @param clock [#now] the time source
-      def initialize(leader:, resting:, fight:, clock: Time)
+      # @param looting [#call] -> Boolean, true while the leader's own Loot
+      #   is working (its script running)
+      def initialize(leader:, resting:, fight:, clock: Time, looting: -> { false })
         super()
         @leader = leader
         @resting = resting
         @fight = fight
+        @looting = looting
         @clock = clock
         @called_at = nil
         @reason = nil
@@ -1863,6 +1882,10 @@ module EO::Engine
           return false
         end
         return false if @leader.solo? && !strict_movement?
+        # Taking the tick from Loot kills its script mid-room. Every hold
+        # below only waits or readies a move, and neither should cost the
+        # room's loot: let the script finish first.
+        return false if @looting.call
         if @fight.call(world)
           @leader.cancel_movement! if strict_movement?
           reset_movement(world.room.id)
@@ -2362,11 +2385,17 @@ module EO::Engine
       # @param member [Group::Member] the link to the leader
       # @param travel [#call, nil] (room) -> Trip or Boolean; default a Travel trip
       # @param clock [#now] the time source
-      def initialize(member:, travel: nil, clock: Time)
+      # @param stance [#call, nil] (name) -> Boolean; default Lich's Stance.change
+      # @param stance_at [#call, nil] (name) -> Boolean; default Lich's Stance.at?
+      # @param wander_stance [String, nil] the stance out of a fight; nil keeps it
+      def initialize(member:, travel: nil, clock: Time, stance: nil, stance_at: nil, wander_stance: nil)
         super()
         @member = member
         @travel = travel || EO::Engine::Travel.default
         @clock = clock
+        @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @stance_at = stance_at || ->(name) { ::Lich::Gemstone::Stance.at?(name) }
+        @wander_stance = wander_stance
         @trip = nil
         @independent = false
         @rejoin = false
@@ -2425,6 +2454,7 @@ module EO::Engine
           return false
         end
         return true if @trip
+        return true if stance_due?(world)
 
         !leader_here?(world) || !grouped?(world)
       end
@@ -2442,6 +2472,10 @@ module EO::Engine
           EO::Engine::Travel.step(self, @travel, @trip.place, world)
           return nil
         end
+
+        # Out of a fight, the wander stance: the moment nothing here is
+        # alive, not on the next room (Assist sits above while it fights).
+        @stance.call(@wander_stance) if stance_due?(world)
 
         unless leader_here?(world)
           room = destination
@@ -2481,6 +2515,14 @@ module EO::Engine
       end
 
       private
+
+      # Out of the wander stance with no creature alive here.
+      def stance_due?(world)
+        return false if @wander_stance.nil?
+        return false if Array(world.room.targets).any? { |t| t.status.to_s !~ /dead|gone/ }
+
+        !@stance_at.call(@wander_stance)
+      end
 
       def leader_here?(world)
         leader = @member.leader_name.to_s

@@ -262,6 +262,19 @@ RSpec.describe EO::Engine::Group::Leader do
       policy.never_loot = %w[Bob Ann]
       expect(leader.looter(me_left: 10)).to eq('Lead')
     end
+
+    it 'gives the final loot to final_looter when in the group, else picks as for a corpse' do
+      policy.final_looter = 'bob'
+      expect(leader.final_looter).to eq('Bob')
+      policy.never_loot = ['Bob']
+      expect(leader.final_looter).to eq('Lead')
+      policy.never_loot = []
+      policy.final_looter = 'Zed'
+      policy.looter = 'Ann'
+      expect(leader.final_looter).to eq('Ann')
+      policy.final_looter = nil
+      expect(leader.final_looter).to eq('Ann')
+    end
   end
 
   it 'publishes the leader state and orders every follower' do
@@ -794,6 +807,20 @@ RSpec.describe EO::Engine::Behaviors::Follow do
     expect(follow.wants_control?(world)).to be false
   end
 
+  it 'goes to the wander stance the moment nothing in the room is alive' do
+    stances = []
+    at = 'offensive'
+    walker = described_class.new(member: member, travel: ->(_r) { true }, stance: ->(n) { stances << (at = n) },
+                                 stance_at: ->(n) { at == n }, wander_stance: 'defensive')
+    room.targets = [OpenStruct.new(status: '')]
+    expect(walker.wants_control?(world)).to be false
+    room.targets = [OpenStruct.new(status: 'dead')]
+    expect(walker.wants_control?(world)).to be true
+    walker.tick(world)
+    expect(stances).to eq(%w[defensive])
+    expect(walker.wants_control?(world)).to be false
+  end
+
   it 'goes to the leader\'s room when the leader is elsewhere' do
     room.players = []
     expect(follow.wants_control?(world)).to be true
@@ -1016,6 +1043,16 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.tick(world)).to be_nil
     fight[0] = true
     expect(muster.wants_control?(world)).to be false
+  end
+
+  it "waits for the leader's own loot script instead of killing it with a hold" do
+    looting = [true]
+    m = described_class.new(leader: leader, resting: -> { false }, fight: ->(_w) { false }, clock: clock, looting: -> { looting.first })
+    hub.report('Bob', report('Bob', rt: true))
+    expect(m.wants_control?(world)).to be false
+    looting[0] = false
+    expect(m.wants_control?(world)).to be true
+    expect(m.reason).to eq(:member_roundtime)
   end
 
   it 'holds while a group member is on the ground, and not for a dead one' do

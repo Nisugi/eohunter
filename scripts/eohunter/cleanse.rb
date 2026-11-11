@@ -31,7 +31,7 @@ module EO::Engine
       break_runestone determination itchy_curse safe_room use_stunned_barkskin use_berserk_stunned
       use_stunned1040 use_stance1 use_stance2 use_flee use_hide use_709 use_619 use_213 use_1011
       use_9811 use_140 use_919 use_1635
-      troubadours_rally
+      troubadours_rally stand_stance
     ].freeze
 
     # The ecleanse.yaml toggles, one member per KEYS entry: every toggle
@@ -666,6 +666,17 @@ module EO::Engine
     # Lich's Mana.pulse; the roundtime wait is Base#settle_rt; the stand
     # is Actions::Stand.
     module CleanseHelpers
+      # STAND in the profile's stand_stance (Policy#stand_stance), the
+      # stance put back after, as Survival stands.
+      #
+      # @param stand_stance [String, false, nil] nil or false stands as we are
+      # @return [Actions::Result, nil] nil when already standing
+      def stand_up(stand_stance)
+        return nil if me.standing?
+
+        Stand.new(@world, stand_stance: stand_stance || nil, interrupt: @interrupt).call
+      end
+
       # Lich's CMan.use: the command from the maneuver table, sent after
       # roundtime and confirmed on the maneuver's own result lines (the
       # raw sends matched /.*/, any line at all). nil from Lich means
@@ -767,6 +778,12 @@ module EO::Engine
     class CleanseMagical < Base
       include CleanseHelpers
 
+      # @param stand_stance [String, nil] the stance to stand in
+      def initialize(world, stand_stance: nil, **opts)
+        super(world, **opts)
+        @stand_stance = stand_stance
+      end
+
       # Dead, or no dispel known, refuses the cleanse.
       #
       # @return [Symbol] :ok, or the gate that refused
@@ -789,7 +806,7 @@ module EO::Engine
           next unless me.debuff_active?(debuff)
 
           ::Lich::Gemstone::Mana.pulse(@spell)
-          Stand.new(@world, stand_stance: nil, interrupt: @interrupt).call unless me.standing?
+          stand_up(@stand_stance)
           settle_rt
           break unless @spell.affordable?
 
@@ -804,6 +821,12 @@ module EO::Engine
     # restored, else Escape Artist for a root.
     class CleanseGrounded < Base
       include CleanseHelpers
+
+      # @param stand_stance [String, nil] the stance to stand in
+      def initialize(world, stand_stance: nil, **opts)
+        super(world, **opts)
+        @stand_stance = stand_stance
+      end
 
       # Only death refuses.
       #
@@ -822,7 +845,7 @@ module EO::Engine
             next unless me.debuff_active?(debuff) && me.stamina >= 11
 
             settle_rt
-            Stand.new(@world, stand_stance: nil, interrupt: @interrupt).call unless me.standing?
+            stand_up(@stand_stance)
             settle_rt
             current = me.current_target_id
             send_through_ladder('target clear')
@@ -1327,7 +1350,7 @@ module EO::Engine
               break
             end
             if lines.any? { |l| l =~ /You're not in any condition to be searching around/ }
-              Stand.new(@world, stand_stance: nil, interrupt: @interrupt).call unless me.standing?
+              stand_up(@policy.stand_stance)
               stops.each { |n| send_through_ladder("stop #{n}") }
               Events.emit(:cleanse_stuck, reason: "Unable to search; #{noun} is in room #{room_id}")
               return Result.new(status: :failed, reason: :cannot_search)
@@ -1336,7 +1359,7 @@ module EO::Engine
           end
           settle_rt
         end
-        Stand.new(@world, stand_stance: nil, interrupt: @interrupt).call unless me.standing?
+        stand_up(@policy.stand_stance)
         settle_rt
         fill_hands
         stops.each { |n| send_through_ladder("stop #{n}") }
@@ -1924,8 +1947,8 @@ module EO::Engine
         when :disease then Actions::CleanseAffliction.new(world, kind: :disease).call
         when :stun then Actions::CleanseStun.new(world, policy: p).call
         when :web_bound then Actions::CleanseWebBound.new(world, policy: p).call
-        when :grounded then Actions::CleanseGrounded.new(world).call
-        when :magical then Actions::CleanseMagical.new(world).call
+        when :grounded then Actions::CleanseGrounded.new(world, stand_stance: p.stand_stance).call
+        when :magical then Actions::CleanseMagical.new(world, stand_stance: p.stand_stance).call
         # The hazard predicates run a second time here, after
         # wants_control? already saw one: the object can leave the room
         # in between (it was looted, it expired, another hunter took it),
