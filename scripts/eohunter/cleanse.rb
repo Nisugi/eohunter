@@ -553,6 +553,15 @@ module EO::Engine
       # @return [Array<Integer>] the remedy spells this character knows
       def known(world) = SPELLS.select { |n| world.spell[n]&.known? }
 
+      # The group's members: Lich's Group, and every name on the roster.
+      # On a follower Lich's Group only learns of members who join after
+      # it does, so a follower that joined last knew only the leader and
+      # never saw a groupmate's stun (2026-11-10, Monstr). The roster is
+      # the hub's own list.
+      #
+      # @return [Array<String>]
+      def members(world, roster) = world.group_nouns | roster.keys.map(&:to_s)
+
       # Every need in the room, as [victim, kind] pairs.
       #
       # @param world [World]
@@ -560,7 +569,7 @@ module EO::Engine
       # @param name [String] this character
       # @return [Array<Array(String, Symbol)>]
       def needs(world, roster, name)
-        grouped = world.group_nouns
+        grouped = members(world, roster)
         here = Array(world.room.players).select { |p| grouped.include?(p.noun.to_s) && p.status.to_s !~ /dead/i }
         list = here.filter_map do |p|
           status = p.status.to_s

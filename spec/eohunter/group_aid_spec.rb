@@ -111,6 +111,13 @@ RSpec.describe EO::Engine::Cleanse::Aid do
     end
   end
 
+  it "sees a groupmate's stun from the roster when Lich's group does not know it" do
+    world[:group_nouns] = ['Nisugi'] # a follower that joined last
+    room.players.find { |p| p.noun == 'Dicate' }.status = 'stunned'
+    expect(pick('Monstr', t0).victim).to eq('Dicate')
+    expect(described_class.pick(world, {}, 'Monstr', EO::Engine::Cleanse::State.new, t0)).to be_nil
+  end
+
   it 'ignores a stunned player outside the group, and a dead groupmate' do
     room.players << pc('Stranger', 'stunned')
     room.players.find { |p| p.noun == 'Dicate' }.status = 'dead'
