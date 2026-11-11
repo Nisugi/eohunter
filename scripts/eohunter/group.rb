@@ -2172,11 +2172,16 @@ module EO::Engine
       # its own before the walk out (Rest#prepare_departure): ready before
       # the trip, not on arrival. A failure is the loadout_stuck event's.
       def step_hands(world)
+        result = @prepare_hands&.call(world)
+        # Skipped is a gate that refused (muckled): nothing was readied and
+        # no loadout_stuck was raised, so try again next tick, unacked.
+        return result if result&.skipped?
+
         @phase = :idle
         # Acked even when the hands failed: loadout_stuck has asked for
         # the rest, and the leader must not hold the walk out for it.
         @pending_ack = :hunting_prep
-        @prepare_hands&.call(world)
+        result
       end
 
       # Rest's fixed successors, redirected to idle.

@@ -633,6 +633,20 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(hub.acked(:hunting_prep)).to eq(['Bob'])
   end
 
+  it 'tries its hands again while muckled, and acks only once they are ready' do
+    answers = [EO::Engine::Actions::Result.new(status: :skipped, reason: :muckled), nil]
+    orders.prepare_hands = ->(_w) { answers.shift }
+    hub.broadcast(:hunting_prep, room: 1)
+    results = []
+    5.times { results << orders.tick(world) if orders.wants_control?(world) && answers.size == 2 }
+    expect(results.compact.last).to be_skipped
+    expect(orders.phase).to eq(:hands)
+    expect(hub.acked(:hunting_prep)).to be_empty
+    run
+    expect(answers).to be_empty
+    expect(hub.acked(:hunting_prep)).to eq(['Bob'])
+  end
+
   it 'runs follower resting scripts sequentially' do
     policy.resting_scripts = ['eherbs', 'eloot sell']
     hub.broadcast(:resting_scripts_start, room: 1)
