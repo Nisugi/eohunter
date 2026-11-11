@@ -2299,6 +2299,10 @@ module EO::Engine
 
         @rejoin = false if leader_here?(world)
         if parked?(world)
+          # A trip that brought us here may still have go2 restoring its
+          # travel equipment: tick takes it to the end, as on any arrival.
+          return true if @trip && @trip.place.to_s == world.room.id.to_s
+
           cancel! if @trip
           return false
         end
@@ -2315,6 +2319,10 @@ module EO::Engine
       def tick(world)
         if world.me.in_rt? || world.me.in_cast_rt?
           return Actions::Result.new(status: :skipped, reason: :roundtime)
+        end
+        if @trip && parked?(world)
+          EO::Engine::Travel.step(self, @travel, @trip.place, world)
+          return nil
         end
 
         unless leader_here?(world)

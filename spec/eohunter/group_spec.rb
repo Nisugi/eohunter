@@ -786,6 +786,28 @@ RSpec.describe EO::Engine::Behaviors::Follow do
       expect(trips).to eq([100])
     end
 
+    it 'lets the trip that parked it finish go2 cleanup before it settles' do
+      trip = Class.new do
+        attr_accessor :done
+        attr_reader :cancelled
+
+        def place = 100
+        def tick(_w) = done ? EO::Engine::Actions::Result.new(status: :success, reason: :arrived) : nil
+        def cancel! = @cancelled = true
+      end.new
+      parking = described_class.new(member: member, travel: ->(_r) { trip })
+      room.id = 50
+      parking.tick(world)
+      room.id = 100 # arrived; go2 is still putting gear away
+      expect(parking.wants_control?(world)).to be true
+      expect(parking.tick(world)).to be_nil
+      expect(trip.cancelled).to be_nil
+      trip.done = true
+      parking.tick(world)
+      expect(parking.wants_control?(world)).to be false
+      expect(trip.cancelled).to be_nil
+    end
+
     it 'goes to the leader again when a follow_now calls it back' do
       room.id = 100
       follow.rejoin!
