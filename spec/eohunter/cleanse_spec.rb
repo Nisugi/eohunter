@@ -13,6 +13,16 @@ CleanseSpell = Struct.new(:num, :known, :affordable, :active, keyword_init: true
   def casts = @casts || 0
 end unless defined?(CleanseSpell)
 
+RSpec.describe EO::Engine::Actions::CleanseGrounded do
+  it 'stands in the stand stance, not whatever stance it was in' do
+    world = OpenStruct.new(me: OpenStruct.new(standing?: false, dead?: false))
+    stand = instance_double(EO::Engine::Actions::Stand, call: nil)
+    allow(EO::Engine::Actions::Stand).to receive(:new).and_return(stand)
+    described_class.new(world, stand_stance: 'guarded').send(:stand_up, 'guarded')
+    expect(EO::Engine::Actions::Stand).to have_received(:new).with(world, stand_stance: 'guarded', interrupt: nil)
+  end
+end
+
 RSpec.describe EO::Engine::Cleanse::Policy do
   it 'reads ecleanse.yaml and falls back to CharSettings defaults' do
     require 'tmpdir'

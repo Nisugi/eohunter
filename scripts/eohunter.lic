@@ -361,6 +361,9 @@ module EOHunter
     E::Events.error_reporter = ->(type, error) { msg('error', "handler for #{type} raised #{error.class}: #{error.message}") }
     E::Events.on(:engine_started) { |e| msg('info', "hunting: #{e.data[:behaviors].join(', ')}") }
     E::Events.on(:engine_stopped) { |e| msg('warn', "stopped: #{e.data[:reason]}") }
+    E::Events.on(:spell_refused) do |e|
+      msg('warn', "spell #{e.data[:spell]}: the game says we do not know it; not trying it again this hunt") if e.data[:reason] == :not_known
+    end
     E::Events.on(:preparation_failed) do |e|
       preparation_failure ||= "preparation #{e.data[:name]}: #{e.data[:status]} (#{e.data[:reason]}); inspect before restarting"
       msg('error', preparation_failure)
@@ -524,6 +527,7 @@ module EOHunter
     counters = E::Rest::Counters.new
     travel = scripts && ->(room) { E::Travel::Trip.new(room, scripts: scripts) }
     loot = E::Behaviors::Loot.new(policy: profile.loot_policy, targets_policy: targets_policy, rest_policy: rest_policy,
+                                  wander_stance: wander_policy.wander_stance,
                                   counters: counters, group: leader, scripts: scripts)
     buffs = E::BuffPolicy::Coordinator.new(policy: profile.buff_policy) if profile.buff_policy.enabled?
     # Rest drives Loot for the final loot before leaving (should_rest? 9041)
@@ -566,7 +570,7 @@ module EOHunter
           !rest.resting? && !loot.looting? && !engage.owns_hands?(w) && !E::Wander::Predicates.fight_here?(w, targets_policy, wander_policy)
         end
       end
-      behaviors[:muster] = E::Behaviors::Muster.new(leader: leader, resting: -> { rest.resting? },
+      behaviors[:muster] = E::Behaviors::Muster.new(leader: leader, resting: -> { rest.resting? }, looting: -> { loot.looting? },
                                                     fight: ->(w) { E::Wander::Predicates.fight_here?(w, targets_policy, wander_policy) })
     end
     behaviors
@@ -683,10 +687,11 @@ module EOHunter
     rest_policy = profile.rest_policy(wounded_binding: binding)
     travel = scripts && ->(room) { E::Travel::Trip.new(room, scripts: scripts) }
     loot = E::Behaviors::Loot.new(policy: profile.loot_policy, targets_policy: targets_policy, rest_policy: rest_policy,
+                                  wander_stance: wander_policy.wander_stance,
                                   counters: counters, follower: true, scripts: scripts)
     assist = E::Behaviors::Assist.new(member: member, policy: profile.engage_policy, targets_policy: targets_policy, wander_policy: wander_policy,
                                       mstrike_policy: profile.mstrike_policy, maintain_state: maintain_state)
-    follow = E::Behaviors::Follow.new(member: member, travel: travel)
+    follow = E::Behaviors::Follow.new(member: member, travel: travel, wander_stance: wander_policy.wander_stance)
     orders = E::Behaviors::Orders.new(member: member, policy: rest_policy, counters: counters, assist: assist, follow: follow, loot: loot,
                                       sneaky: wander_policy.sneaky, scripts: scripts, travel: travel)
     loadout = E::Behaviors::Loadout.new(policy: profile.loadout_policy, selection: profile.loadout_selection,

@@ -1103,13 +1103,15 @@ module EO::Engine
           result = run_line(world, line)
           held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
           @cursor = (@cursor + 1) % @routine.size unless held_preparation
-          break unless result&.skipped? && result.reason == :condition
+          break unless result&.skipped? && PASSED_OVER.include?(result.reason)
         end
         result
       end
 
       private
 
+      # Skips that cost nothing: on to the next line in the same tick.
+      PASSED_OVER = %i[condition spell_not_known spell_held].freeze
       # Seconds a turbo TARGET has to show up as our target before it is probed.
       TURBO_CONFIRM = 1.0
       ATTACK_ORDER_EVERY = 10 # do_hunt 7383: a new target, or every ten seconds
