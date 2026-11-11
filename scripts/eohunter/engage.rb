@@ -27,11 +27,24 @@ module EO::Engine
     Policy = Struct.new(:routines, :quick_commands, :disable_commands, :priority, :hunting_stance, :wander_stance,
                         :wand_if_oom, :use_wracking, :wracking_spirit, :oom, :ambush, :quick,
                         :archery_aim, :aim, :tier3, :uac_smite, :uac_mstrike, :ammo_container, :fresh_wand_container,
-                        :dead_wand_container, :wand, :weapon_reaction, :preparations, keyword_init: true) do
+                        :dead_wand_container, :wand, :weapon_reaction, :preparations, :turbo, keyword_init: true) do
       def initialize(routines: {}, quick_commands: [], disable_commands: [], priority: false, hunting_stance: 'defensive',
                      wander_stance: 'defensive', wand_if_oom: false, use_wracking: false, wracking_spirit: 0, oom: 0, ambush: [], quick: false,
                      archery_aim: [], aim: [], tier3: 'punch', uac_smite: false, uac_mstrike: false, ammo_container: nil,
-                     fresh_wand_container: nil, dead_wand_container: nil, wand: [], weapon_reaction: true, preparations: nil) = super
+                     fresh_wand_container: nil, dead_wand_container: nil, wand: [], weapon_reaction: true, preparations: nil, turbo: false) = super
+
+      # How much of target, stance and command goes out without waiting:
+      # nil waits for each, :stance batches stance and command after a
+      # confirmed TARGET, :all batches the three. Type-ahead is why it is a
+      # choice. The profile's true means :all.
+      #
+      # @return [Symbol, nil]
+      def turbo_mode
+        case turbo.to_s.downcase
+        when 'true', 'all' then :all
+        when 'stance' then :stance
+        end
+      end
 
       # find_routine: the letter's list, else the default (a).
       #
@@ -886,6 +899,18 @@ module EO::Engine
         @maintain_state = maintain_state
         @scripts = scripts || EO::Engine::Behaviors::Rest::LichScripts
         @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @turbo_send = ->(command) { put(command) }
+        # Lich's Stance.change(wait: false) still goes through fput, which
+        # waits for the game. A percentage stance keeps it: only Lich knows
+        # the command for one.
+        @turbo_stance = lambda do |name|
+          next ::Lich::Gemstone::Stance.change(name) if name.to_s =~ /\A\d/
+          next true if ::Lich::Gemstone::Stance.at?(name)
+
+          @turbo_send.call("stance #{name}")
+          true
+        end
+        @turbo_sent_at = nil
         @group = group
         @fried = fried || -> { false }
         @routine_selector = routine_selector
@@ -1062,6 +1087,9 @@ module EO::Engine
           # preparation pending so its consumptive command gets its own tick.
           return probe if probe && named_preparation?(@routine[@cursor]&.text)
         end
+        late = confirm_turbo_target(world)
+        return late if late
+
         @on_fight&.call
         called = call_followers(world)
         return called if called
@@ -1082,6 +1110,8 @@ module EO::Engine
 
       private
 
+      # Seconds a turbo TARGET has to show up as our target before it is probed.
+      TURBO_CONFIRM = 1.0
       ATTACK_ORDER_EVERY = 10 # do_hunt 7383: a new target, or every ten seconds
       CALL_BACK_EVERY = 10
       # The longest a routine's `sleep N` may hold the tick. bigshot has no
@@ -1195,6 +1225,36 @@ module EO::Engine
         @state.routines_reset!(moved: false)
         @state.unarmed_tier = 1
 
+        # Turbo all: send it and go, so TARGET, stance and the line land together.
+        # A roundtime would refuse them; a preparation wants the answer first.
+        if @policy.turbo_mode == :all && turbo_now?(world) && !named_preparation?(@routine[@cursor]&.text)
+          @turbo_send.call("target ##{@target.id}")
+          @turbo_sent_at = @clock.now
+          return nil
+        end
+
+        probe_target(world)
+      end
+
+      def turbo_now?(world) = !@policy.turbo_mode.nil? && !world.me.in_rt? && !world.me.in_cast_rt?
+
+      def hunting_stance_for(world)
+        (turbo_now?(world) ? @turbo_stance : @stance).call(@policy.hunting_stance)
+      end
+
+      # A turbo TARGET nobody answered for: once the game has had time, ask
+      # properly, so a creature that left or cannot be targeted is still read.
+      def confirm_turbo_target(world)
+        return nil unless @turbo_sent_at
+        return @turbo_sent_at = nil if world.me.current_target_id.to_s == @target&.id.to_s
+        return nil if @clock.now - @turbo_sent_at < TURBO_CONFIRM
+
+        @turbo_sent_at = nil
+        result = probe_target(world)
+        result unless result&.success?
+      end
+
+      def probe_target(world)
         result = Actions::Target.new(world, target: @target).call
         if result.failed? && result.reason == :target_left
           @target = nil
@@ -1231,7 +1291,7 @@ module EO::Engine
         unless preparation
           soothe(world)
           reaction(world)
-          @stance.call(@policy.hunting_stance) if @policy.hunting_stance && text !~ STANCE_FREE
+          hunting_stance_for(world) if @policy.hunting_stance && text !~ STANCE_FREE
         end
         # The two action events bracket every routine line on every hunt:
         # the controller's trials read the resolved one, and the debug
