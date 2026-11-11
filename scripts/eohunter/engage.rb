@@ -248,7 +248,10 @@ module EO::Engine
       REPEAT = /^repeatdelay(\d+)$/i
       # ES/EB/EC/ED"name": a spell, buff, cooldown or debuff by pattern,
       # negated with "!".
-      EFFECTS = /^(!?E[SBCD])"(.+)"$/i
+      # A number counts the effect as up only with more than that many
+      # seconds left (EB7, ES30). EB also reads Lich's own spell timer, for
+      # what the game never lists (Briar Betrayer).
+      EFFECTS = /^(!?E[SBCD])(\d*)"(.+)"$/i
       # empoweredN: skip when an Empowered buff of +N or more is up.
       EMPOWERED = /^(!?)empowered(\d+)$/i
       # thpN: skip while the target's HP percent is above N.
@@ -354,7 +357,7 @@ module EO::Engine
           return !last.nil? && (now - last) < m[1].to_i
         end
         if (m = mod.match(EFFECTS))
-          return effects_skip?(m[1].upcase, /#{m[2]}/i, me)
+          return effects_skip?(m[1].upcase, /#{m[3]}/i, me, name: m[3], seconds: m[2].empty? ? nil : m[2].to_i)
         end
 
         word_skip?(mod.downcase, line, world, target, state)
@@ -396,14 +399,27 @@ module EO::Engine
       # @param pattern [Regexp] the effect name
       # @param me [World::Me]
       # @return [Boolean] true to skip the line
-      def effects_skip?(kind, pattern, me)
-        active = case kind.delete_prefix('!')
+      def effects_skip?(kind, pattern, me, name: nil, seconds: nil)
+        base = kind.delete_prefix('!')
+        active = case base
                  when 'ES' then me.spell_effect_active?(pattern)
-                 when 'EB' then me.effect_active?(pattern)
+                 when 'EB' then buff_up?(pattern, me, name, seconds)
                  when 'EC' then me.cooldown_active?(pattern)
                  when 'ED' then me.debuff_active?(pattern)
                  end
+        active &&= me.effect_seconds_left(base, pattern) > seconds if seconds && base != 'EB'
         kind.start_with?('!') ? active : !active
+      end
+
+      # The game's panels first, then Lich's timer for the same name; with
+      # +seconds+, up only while more than that remains.
+      def buff_up?(pattern, me, name, seconds)
+        from_game = me.effect_active?(pattern)
+        lich = !from_game && me.respond_to?(:lich_spell_seconds_left) ? me.lich_spell_seconds_left(name) : nil
+        return false unless from_game || lich
+        return true if seconds.nil?
+
+        (lich || me.buff_time_left(pattern) * 60) > seconds
       end
 
       # The target's CreatureInstance, when the world has a registry.
@@ -610,7 +626,10 @@ module EO::Engine
     # @bigshot valid_target?
     class Target < Base
       # Every line that answers a TARGET.
-      ANSWERS = /^You are now targeting|^You can't target|^You discern that you are the origin|^You are unable to discern the origin|^What were you referring to\?/
+      ANSWERS = /^Usage:\s+TARGET|^You do not have a target|^You are now targeting|^You can't target|^You discern that you are the origin|^You are unable to discern the origin|^What were you referring to\?/
+      # The game's answer when the creature has already left: a usage block
+      # ending in "You do not have a target." Nothing to wait out.
+      LEFT = /^Usage:\s+TARGET|^You do not have a target/
       # The answers that mean the creature cannot be targeted.
       REFUSED = /^You can't target|^You discern that you are the origin|^You are unable to discern the origin/
 
@@ -636,6 +655,7 @@ module EO::Engine
       def perform
         result = send_and_match("target ##{@target.id}", ANSWERS, timeout: @timeout)
         return result unless result.success?
+        return Result.new(status: :failed, reason: :target_left, line: result.line) if result.line =~ LEFT
         return Result.new(status: :failed, reason: :untargetable, line: result.line) if result.line =~ REFUSED
         return Result.new(status: :failed, reason: :referent_missing, line: result.line) if result.line =~ /What were you/
 
@@ -800,8 +820,9 @@ module EO::Engine
 
       # Lines sent as an Attack.
       VERBS = /^(?:attack|kill|jab|punch|kick|grapple|hurl)\b/
-      # Lines that do not get the hunting stance first.
-      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon)/i
+      # Lines that do not get the hunting stance first. kweed: the damaging
+      # vine no longer needs an offensive stance, from any stance it evokes.
+      STANCE_FREE = /^(?:\d+|wait|sleep|wand|berserk|script|hide|nudgeweapon|kweed)/i
       # Floor objects that mean a weed is already down (cmd_weed 4797).
       WEEDS = /\b(?:vine|bramble|widgeonweed|vathor club|swallowwort|smilax|creeper|briar|ivy|tumbleweed)\b/
       # A spell line: optional incant, the number, then the cast word and
@@ -1046,10 +1067,16 @@ module EO::Engine
         return called if called
         return Actions::Result.new(status: :failed, reason: :no_routine) if @routine.empty?
 
-        line = @routine[@cursor]
-        result = run_line(world, line)
-        held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
-        @cursor = (@cursor + 1) % @routine.size unless held_preparation
+        # A line whose condition is not met sent nothing, so it need not
+        # cost a tick: on to the next until one acts, at most once around.
+        result = nil
+        @routine.size.times do
+          line = @routine[@cursor]
+          result = run_line(world, line)
+          held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
+          @cursor = (@cursor + 1) % @routine.size unless held_preparation
+          break unless result&.skipped? && result.reason == :condition
+        end
         result
       end
 
@@ -1169,6 +1196,10 @@ module EO::Engine
         @state.unarmed_tier = 1
 
         result = Actions::Target.new(world, target: @target).call
+        if result.failed? && result.reason == :target_left
+          @target = nil
+          return Actions::Result.new(status: :skipped, reason: :target_gone, line: result.line)
+        end
         if result.failed? && result.reason == :untargetable
           # Another group member can kill the creature while TARGET is in
           # flight. The game then answers "You can't target ...", but that
