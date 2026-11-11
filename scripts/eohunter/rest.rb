@@ -816,26 +816,14 @@ module EO::Engine
       def final_loot?(world)
         return @reason.to_s.match?(FINAL_LOOT_REASONS) unless @any_wounded
 
-        threats = threats_here(world)
+        threats = Array(world.room&.targets).count { |t| t.status.to_s !~ HARMLESS }
         Events.emit(:final_loot_skipped, reason: :hostiles_here, count: threats) if threats.positive?
         threats.zero?
       end
 
-      # The creatures here that could still hurt a wounded group.
-      def threats_here(world) = Array(world.room&.targets).count { |t| t.status.to_s !~ HARMLESS }
-
       # Loot's ticks, from here, until it has nothing left in this room.
-      # Wounded, the room is checked again every tick: a stunned creature
-      # comes round, or another walks in, and the loot stops and we go.
       def step_final_loot(world)
         @final_loot_ticks += 1
-        threats = @any_wounded ? threats_here(world) : 0
-        if threats.positive?
-          Events.emit(:final_loot_skipped, reason: :hostiles_arrived, count: threats)
-          stop_final_loot!
-          @phase = grouped? ? :wait_followers : :leave
-          return nil
-        end
         if @final_loot_ticks <= FINAL_LOOT_TICKS && @loot.wants_control?(world)
           return @loot.tick(world)
         end
