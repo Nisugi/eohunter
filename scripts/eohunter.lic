@@ -680,7 +680,7 @@ module EOHunter
                                   counters: counters, follower: true, scripts: scripts)
     assist = E::Behaviors::Assist.new(member: member, policy: profile.engage_policy, targets_policy: targets_policy, wander_policy: wander_policy,
                                       mstrike_policy: profile.mstrike_policy, maintain_state: maintain_state)
-    follow = E::Behaviors::Follow.new(member: member, travel: travel)
+    follow = E::Behaviors::Follow.new(member: member, travel: travel, wander_stance: wander_policy.wander_stance)
     orders = E::Behaviors::Orders.new(member: member, policy: rest_policy, counters: counters, assist: assist, follow: follow, loot: loot,
                                       sneaky: wander_policy.sneaky, scripts: scripts, travel: travel)
     loadout = E::Behaviors::Loadout.new(policy: profile.loadout_policy, selection: profile.loadout_selection,

@@ -2239,11 +2239,16 @@ module EO::Engine
       # @param member [Group::Member] the link to the leader
       # @param travel [#call, nil] (room) -> Trip or Boolean; default a Travel trip
       # @param clock [#now] the time source
-      def initialize(member:, travel: nil, clock: Time)
+      # @param stance [#call, nil] (name) -> Boolean; default Lich's Stance.change
+      # @param wander_stance [String, nil] the stance to walk in; nil keeps it
+      def initialize(member:, travel: nil, clock: Time, stance: nil, wander_stance: nil)
         super()
         @member = member
         @travel = travel || EO::Engine::Travel.default
         @clock = clock
+        @stance = stance || ->(name) { ::Lich::Gemstone::Stance.change(name) }
+        @wander_stance = wander_stance
+        @stanced_room = nil
         @trip = nil
         @independent = false
         @rejoin = false
@@ -2291,6 +2296,7 @@ module EO::Engine
       def wants_control?(world)
         return false if @independent
         return true if @trip
+        return true if stance_due?(world)
 
         !leader_here?(world) || !grouped?(world)
       end
@@ -2304,6 +2310,12 @@ module EO::Engine
         if world.me.in_rt? || world.me.in_cast_rt?
           return Actions::Result.new(status: :skipped, reason: :roundtime)
         end
+
+        # The leader walks us room to room in whatever stance the last
+        # routine line left: as Wander does for the leader, the wander
+        # stance once per room, with nothing here worth a fight (Assist
+        # sits above and has the room first when there is).
+        drop_stance(world) if stance_due?(world)
 
         unless leader_here?(world)
           room = @member.leader_room
@@ -2337,6 +2349,15 @@ module EO::Engine
       end
 
       private
+
+      def stance_due?(world) = !@wander_stance.nil? && @stanced_room != world.room.id
+
+      # Once per room: Lich's Stance.change waits out roundtime, so a
+      # repeat every tick would add that wait to every tick.
+      def drop_stance(world)
+        @stanced_room = world.room.id
+        @stance.call(@wander_stance)
+      end
 
       def leader_here?(world)
         leader = @member.leader_name.to_s
