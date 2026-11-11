@@ -1145,6 +1145,23 @@ module EO::Engine
       # @return [Boolean] true when every online follower's rest prep has run
       #   for the current :resting_prep cycle (a bare true, from a follower
       #   whose order named no cycle, is taken at its word)
+      def signs_complete? = (online - @hub.acked(:cast_signs)).empty?
+
+      # Ask the followers for signs, forgetting the last order's answers. An
+      # idle report says nothing about this order, so readiness is its ack
+      # (the Report is the wire format and cannot grow a field for it).
+      #
+      # @param room [Integer] the leader's room
+      # @return [void]
+      def order_signs(room)
+        @hub.clear_acks(:cast_signs)
+        order(:cast_signs, room: room)
+      end
+
+      # Every follower has run its own resting commands and scripts, for
+      # this cycle.
+      #
+      # @return [Boolean]
       def rest_prep_complete?
         cycle = @hub.rest_prep_cycle
         reports.values.all? do |r|
@@ -1875,6 +1892,19 @@ module EO::Engine
       #   under a leader whose order named none
       attr_reader :rest_prep_done
 
+      # Answer a :cast_signs order, once the leader's signs flag has reached
+      # us and Maintain has nothing due. Before the flag Maintain is held, so
+      # nothing due would mean nothing.
+      #
+      # @param idle [#call] -> Boolean, Maintain has nothing to cast
+      # @return [void]
+      def answer_signs(idle)
+        return unless @signs_ordered && @member.leader_signs_wanted? && idle.call
+
+        @signs_ordered = false
+        @member.ack(:cast_signs)
+      end
+
       # @param member [Group::Member]
       # @param policy [Rest::Policy] the follower's own rest settings
       # @param counters [Rest::Counters] the follower's rest counters
@@ -1931,8 +1961,9 @@ module EO::Engine
       # @return [Boolean] true while the leader's phase is :resting
       def resting? = @member.leader_phase == :resting
 
-      # What Maintain gates on: the leader is at the hunting room, so
-      # signs are wanted. Held for the refuge and both walks.
+      # What Maintain gates on: the leader is casting its own signs after
+      # the rally gather, or is at the hunting room, so signs are wanted.
+      # Held for the refuge and both walks.
       # @return [Boolean]
       def signs_wanted? = @member.leader_signs_wanted?
 
@@ -2080,7 +2111,10 @@ module EO::Engine
         when :hunting_scripts_stop
           stop_hunting(world)
           Actions::Result.new(status: :success)
-        when :cast_signs then nil # Maintain casts what is due
+        when :cast_signs
+          # Maintain casts what is due; answer_signs says when it is done.
+          @signs_ordered = true
+          nil
         when :check_sneaky then @sneaky && !world.me.hidden? ? Actions::Hide.new(world).call : nil
         when :go2_rally then travel(Array(rooms[:rally]))
         when :go2_hunting_room then room(rooms[:hunting])
