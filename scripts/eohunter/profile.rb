@@ -51,7 +51,7 @@ module EO::Engine
       'hunting_loadout_sets' => [:structured, {}], 'hunting_loadout_rules' => [:structured, []],
       'hunting_prep_commands' => [:split_xx, []], 'hunting_scripts' => [:split, []], 'signs' => [:split, []],
       'loot_script' => [:string, nil], 'wracking_spirit' => [:to_i, 0],
-      'priority' => [:bool, false], 'delay_loot' => [:bool, false], 'use_wracking' => [:bool, false], 'loot_stance' => [:bool, false],
+      'turbo' => [:string, 'off'], 'priority' => [:bool, false], 'delay_loot' => [:bool, false], 'use_wracking' => [:bool, false], 'loot_stance' => [:bool, false],
       'pull' => [:bool, true], 'deader' => [:bool, false], 'sneaky_sneaky' => [:bool, false], 'check_favor' => [:bool, false],
       'ambush' => [:split, []], 'archery_aim' => [:split, []], 'flee_count' => [:to_i, 100], 'invalid_targets' => [:split, []],
       'always_flee_from' => [:split, []], 'flee_message' => [:regex, nil], 'wander_wait' => [:to_f, 0.3],
@@ -317,7 +317,7 @@ module EO::Engine
                          archery_aim: self['archery_aim'], aim: self['aim'], tier3: self['tier3'], uac_smite: self['uac_smite'],
                          uac_mstrike: self['uac_mstrike'], ammo_container: self['ammo_container'],
                          fresh_wand_container: self['fresh_wand_container'], dead_wand_container: self['dead_wand_container'],
-                         wand: self['wand'], weapon_reaction: self['weapon_reaction'], preparations: preparations)
+                         wand: self['wand'], weapon_reaction: self['weapon_reaction'], preparations: preparations, turbo: self['turbo'])
     end
 
     # The Mstrike Policy from the mstrike_* keys.

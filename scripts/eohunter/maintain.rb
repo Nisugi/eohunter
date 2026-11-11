@@ -660,16 +660,20 @@ module EO::Engine
 
       # Whether a bless is wanted or a sign is due, remembered for tick.
       #
-      # Signs belong at the hunting room, where bigshot's pre_hunt casts
-      # them and where Rest issues its cast_signs order. Held everywhere
-      # else in the cycle: parked in the refuge, walking home, walking
-      # back out. A sign cast on the way out burns for the whole trip and
-      # can dissipate before the first fight.
+      # Signs belong at Rest's :signs step (after the rally gather, before
+      # the trip to the hunting room, where bigshot's pre_hunt casts them)
+      # and at the hunting room, where Rest issues its cast_signs order.
+      # Held everywhere else in the cycle: parked in the refuge, walking
+      # home, walking to the rally. A sign cast on the way out burns for
+      # the whole trip and can dissipate before the first fight.
       #
-      # Anything wanted earlier belongs in the hunting prep commands,
-      # which reach the game verbatim. Rest's own buff recovery still
-      # runs at the refuge through restore_buff, which is called directly
-      # and does not pass through this gate.
+      # Rest outranks this behavior and holds control through the whole
+      # departure, so the :signs step borrows the turn through Rest's
+      # cast_signs seam (wants_control? then tick) rather than waiting for
+      # arbitration. Anything wanted earlier belongs in the hunting prep
+      # commands, which reach the game verbatim. Rest's own buff recovery
+      # still runs at the refuge through restore_buff, which is called
+      # directly and does not pass through this gate.
       #
       # @param world [World]
       # @return [Boolean]

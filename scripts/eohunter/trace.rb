@@ -31,11 +31,11 @@ module EO::Engine
                  unarmed_followup unarmed_tier ammo_no_effect untargetable_learned],
       movement: %i[travel_started travel_arrived travel_failed travel_suspended entered_room out_of_bounds
                    fog_return tracked uncovered hidden_arrival],
-      rest: %i[rest_started resting rested rest_finished rest_destination rest_retry rest_stuck rest_stranded
+      rest: %i[signs_held signs_wait_expired rest_started resting rested rest_finished rest_destination rest_retry rest_stuck rest_stranded
                rest_service_failed town_rest_complete final_loot_done overkill loot_script_started loot_stuck],
       group: %i[order followers_ready waiting_for_followers follower_lost loot_assigned hunt_over hunt_ended
                 coordination_return_required],
-      recovery: %i[fleeing cleansing cleansed cleanse_stuck died deader disarmed rooted out_of_mana
+      recovery: %i[standing pulling fleeing cleansing cleansed cleanse_stuck died deader disarmed rooted out_of_mana
                    too_injured_for_wands no_fresh_wands maintain_stuck loadout_stuck buff_policy_status
                    preparation_failed],
       bounty: %i[bounty_hunt bounty_stage bounty_waiting bounty_removing bounty_script bounty_error
@@ -313,6 +313,9 @@ module EO::Engine
       # then every behavior above that declined and, when the behavior
       # says, why. bigshot cannot print this because it has no arbiter;
       # here it is the answer to "why is it doing that instead".
+      # Seconds from which the tick line reports how long a turn took.
+      SLOW_TURN = 1.0
+
       def on_tick(world, tick, status)
         return unless on? && @settings['tick']
 
@@ -325,9 +328,20 @@ module EO::Engine
                     'status=-'
                   end
         declined = Array(@engine.last_evaluations).reject { |_n, wanted| wanted }.map { |n, _| "#{n}=#{reason_of(n)}" }
-        text = "tick ##{tick} holder=#{held} #{outcome}"
+        text = "tick ##{tick} holder=#{held}#{holder_detail(status[:behavior])} #{outcome}"
         text += " | declined: #{declined.join(' ')}" unless declined.empty?
         write(Trace.stamp(@clock.call, :engine, @room, text))
+      end
+
+      # Why the holder wanted the tick, and how long a slow turn took.
+      def holder_detail(name)
+        return '' if name.nil?
+
+        why = reason_of(name)
+        text = why == 'none' ? '' : " why=#{why}"
+        took = @engine.respond_to?(:last_action_seconds) ? @engine.last_action_seconds : nil
+        text += format(' took=%.1fs', took) if took && took >= SLOW_TURN
+        text
       end
 
       def reason_of(name)
