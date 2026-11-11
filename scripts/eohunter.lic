@@ -569,7 +569,7 @@ module EOHunter
           !rest.resting? && !loot.looting? && !engage.owns_hands?(w) && !E::Wander::Predicates.fight_here?(w, targets_policy, wander_policy)
         end
       end
-      behaviors[:muster] = E::Behaviors::Muster.new(leader: leader, resting: -> { rest.resting? },
+      behaviors[:muster] = E::Behaviors::Muster.new(leader: leader, resting: -> { rest.resting? }, looting: -> { loot.looting? },
                                                     fight: ->(w) { E::Wander::Predicates.fight_here?(w, targets_policy, wander_policy) })
     end
     behaviors

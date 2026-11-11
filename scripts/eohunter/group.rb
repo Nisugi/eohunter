@@ -1789,11 +1789,14 @@ module EO::Engine
       # @param resting [#call] -> Boolean, true while the leader is resting
       # @param fight [#call] (world) -> Boolean, true while a fight is on
       # @param clock [#now] the time source
-      def initialize(leader:, resting:, fight:, clock: Time)
+      # @param looting [#call] -> Boolean, true while the leader's own Loot
+      #   is working (its script running)
+      def initialize(leader:, resting:, fight:, clock: Time, looting: -> { false })
         super()
         @leader = leader
         @resting = resting
         @fight = fight
+        @looting = looting
         @clock = clock
         @called_at = nil
         @reason = nil
@@ -1819,6 +1822,10 @@ module EO::Engine
           return false
         end
         return false if @leader.solo? && !strict_movement?
+        # Taking the tick from Loot kills its script mid-room. Every hold
+        # below only waits or readies a move, and neither should cost the
+        # room's loot: let the script finish first.
+        return false if @looting.call
         if @fight.call(world)
           @leader.cancel_movement! if strict_movement?
           reset_movement(world.room.id)

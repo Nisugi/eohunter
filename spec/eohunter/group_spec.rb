@@ -985,6 +985,16 @@ RSpec.describe EO::Engine::Behaviors::Muster do
     expect(muster.wants_control?(world)).to be false
   end
 
+  it "waits for the leader's own loot script instead of killing it with a hold" do
+    looting = [true]
+    m = described_class.new(leader: leader, resting: -> { false }, fight: ->(_w) { false }, clock: clock, looting: -> { looting.first })
+    hub.report('Bob', report('Bob', rt: true))
+    expect(m.wants_control?(world)).to be false
+    looting[0] = false
+    expect(m.wants_control?(world)).to be true
+    expect(m.reason).to eq(:member_roundtime)
+  end
+
   it 'holds while a group member is on the ground, and not for a dead one' do
     room.players = [player('Bob', status: 'lying down')]
     expect(muster.wants_control?(world)).to be true
