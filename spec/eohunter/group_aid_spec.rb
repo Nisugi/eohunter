@@ -132,6 +132,17 @@ RSpec.describe EO::Engine::Cleanse::Aid do
     expect(pick('Zoleta', t0).spell.num).to eq(1040)
   end
 
+  # The rally the aid replaces covered Survival::STUNNED; every status
+  # in it but stunned still reaches 1040 here.
+  %w[immobilized horrified staggered].push('held in place').each do |status|
+    it "rallies a groupmate who is #{status}" do
+      room.players.find { |p| p.noun == 'Dicate' }.status = status
+      roster['Zoleta'] = entry(1040)
+      know(1040)
+      expect(pick('Zoleta', t0).spell.num).to eq(1040)
+    end
+  end
+
   it 'prefers 108 for a stun when both are known' do
     know(1040)
     room.players.find { |p| p.noun == 'Dicate' }.status = 'stunned'

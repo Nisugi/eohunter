@@ -510,9 +510,10 @@ module EO::Engine
       # Seconds before the same need on the same victim gets another cast:
       # long enough for the room, or the victim's report, to show the cure.
       REPEAT = { stun: 4, muckled: 4, poison: 8, disease: 8 }.freeze
-      # A groupmate's room status that 108 answers, and those only 1040 does.
+      # A groupmate's room status that 108 answers, and those only 1040 does:
+      # with STUN, all of Survival::STUNNED, the rally the aid replaces.
       STUN = /stunned/i
-      MUCKLED = /webbed|sleeping|frozen/i
+      MUCKLED = /webbed|sleeping|frozen|immobilized|held in place|horrified|staggered/i
       # Needs the victim may answer itself first.
       SELF_CURABLE = %i[poison disease].freeze
       # The game's word that a groupmate's stun is over, on the raw line
