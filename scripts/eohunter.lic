@@ -361,6 +361,9 @@ module EOHunter
     E::Events.error_reporter = ->(type, error) { msg('error', "handler for #{type} raised #{error.class}: #{error.message}") }
     E::Events.on(:engine_started) { |e| msg('info', "hunting: #{e.data[:behaviors].join(', ')}") }
     E::Events.on(:engine_stopped) { |e| msg('warn', "stopped: #{e.data[:reason]}") }
+    E::Events.on(:spell_refused) do |e|
+      msg('warn', "spell #{e.data[:spell]}: the game says we do not know it; not trying it again this hunt") if e.data[:reason] == :not_known
+    end
     E::Events.on(:preparation_failed) do |e|
       preparation_failure ||= "preparation #{e.data[:name]}: #{e.data[:status]} (#{e.data[:reason]}); inspect before restarting"
       msg('error', preparation_failure)

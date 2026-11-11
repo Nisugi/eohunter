@@ -26,7 +26,7 @@ module EO::Engine
     # Every event type the engine emits, by category. An event in none of
     # these lands under :engine, so a new event is never silently dropped.
     CATEGORIES = {
-      combat: %i[engaged disengaged routine_action_started routine_action_resolved routine_unsupported
+      combat: %i[spell_refused engaged disengaged routine_action_started routine_action_resolved routine_unsupported
                  combat_blocked combat_blocked_departure incoming_swing ally_attacked force_roll
                  unarmed_followup unarmed_tier ammo_no_effect untargetable_learned],
       movement: %i[travel_started travel_arrived travel_failed travel_suspended entered_room out_of_bounds

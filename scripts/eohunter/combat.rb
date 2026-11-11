@@ -159,6 +159,53 @@ module EO::Engine
       HINDERED  = /^\[Spell Hindrance for/
       # The spell fizzled.
       FIZZLED   = /^Your magic fizzles ineffectually\.$/
+      # A debuff holds the prepare shut: Mystic Impedance (1708), 30 seconds
+      # from a branded goliath diviner, per its Debuffs panel entry. Worth
+      # waiting out. "You do not know that spell!" is the other refusal, from
+      # a spell Lich reckons we know but we cannot cast (515 from enhancives
+      # with them switched off, tested by hand): that one will not come back.
+      # Both fell through to success, so the failure streak never saw them.
+      CANNOT_RECALL = /You can't seem to recall how to prepare the .+ spell!/
+      DO_NOT_KNOW = /^You do not know that spell!$/
+      # Lich's name for the debuff behind CANNOT_RECALL.
+      RECALL_DEBUFF = 'Mystic Impedance'
+      # Seconds before a held spell's debuff is read: its panel entry can lag.
+      HOLD_SETTLE = 2
+      # The longest a spell is held, in case the debuff is one we cannot name.
+      HOLD_MAX = 60
+
+      # Spells refused this run: number => :not_known, or the Time it was held.
+      # The engine is reloaded each run, so this starts empty.
+      @refused = {}
+
+      class << self
+        # @return [Hash] see above
+        attr_reader :refused
+
+        # @return [void]
+        def reset_refused! = @refused.clear
+
+        # A spell refused earlier: for good, or until its debuff has ended.
+        # Maintain asks this too, or it would keep claiming the tick for a
+        # sign that can only skip, and Engage would never run.
+        #
+        # @param number [Integer] the spell
+        # @param me [#debuff_active?]
+        # @return [Symbol, nil] :spell_not_known, :spell_held, or nil to try it
+        def refusal(number, me)
+          held = @refused[number]
+          return nil if held.nil?
+          return :spell_not_known if held == :not_known
+
+          age = Time.now - held
+          return :spell_held if age < HOLD_SETTLE
+          return :spell_held if age < HOLD_MAX && me.respond_to?(:debuff_active?) && me.debuff_active?(RECALL_DEBUFF)
+
+          @refused.delete(number)
+          nil
+        end
+      end
+
       # Every answer that means the prepare itself was refused.
       CANNOT_PREPARE = /^You can't think clearly enough to prepare a spell!$|^You are too injured to make that dextrous of a movement|^You can't make that dextrous of a move!$|^The searing pain in your throat makes that impossible|^All you manage to do is cough up some blood\.$|^You do not know that spell!$|^That is not something you can prepare\./
       # No mana at all.
@@ -201,7 +248,7 @@ module EO::Engine
         return :unknown_spell if s.nil? || !s.known?
         return :unaffordable unless s.affordable?
 
-        :ok
+        self.class.refusal(@spell_number, me) || :ok
       end
 
       # Cast through Spell#cast and classify its answer; a hindrance is
@@ -219,6 +266,8 @@ module EO::Engine
           line = answer.to_s
           return Result.new(status: :failed, reason: :blocked, line: line) if line =~ BLOCKED
           return Result.new(status: :failed, reason: :no_target, line: line) if line =~ NO_TARGET
+          return refused(:cannot_recall, Time.now, line) if line =~ CANNOT_RECALL
+          return refused(:not_known, :not_known, line) if line =~ DO_NOT_KNOW
           return Result.new(status: :failed, reason: :cannot_prepare, line: line) if line =~ CANNOT_PREPARE
           return Result.new(status: :failed, reason: :no_mana, line: line) if line =~ NO_MANA
           return Result.new(status: :failed, reason: :fizzled, line: line) if line =~ FIZZLED
@@ -236,6 +285,12 @@ module EO::Engine
       end
 
       private
+
+      def refused(reason, state, line)
+        self.class.refused[@spell_number] = state
+        Events.emit(:spell_refused, spell: @spell_number, reason: reason, line: line)
+        Result.new(status: :failed, reason: reason, line: line)
+      end
 
       def spell
         ::Spell[@spell_number]
