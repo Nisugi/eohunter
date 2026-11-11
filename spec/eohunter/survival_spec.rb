@@ -81,6 +81,16 @@ RSpec.describe EO::Engine::Actions::Stand do
     expect(stances).to eq([])
   end
 
+  it 'sends nothing when someone pulled us up during the roundtime' do
+    action = stand
+    allow(action).to receive(:settle_rt) { me[:standing?] = true }
+    result = action.call
+    expect(result).to be_skipped
+    expect(result.reason).to eq(:already_standing)
+    expect(sent).to eq([])
+    expect(stances).to eq([])
+  end
+
   it 'drops to the stand stance, stands, and restores the stance' do
     expect(stand.call).to be_success
     expect(sent).to eq(['stand', 'stand'])
