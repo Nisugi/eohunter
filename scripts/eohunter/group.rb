@@ -2070,7 +2070,7 @@ module EO::Engine
           @assist&.stand_down!
           @stance.call(@policy.wander_stance) if @policy.wander_stance
           Actions::Result.new(status: :success)
-        when :hunting_prep then prep(@policy.hunting_prep_command_list, [], wait_for_scripts: true)
+        when :hunting_prep then prep(@policy.hunting_prep_command_list, [], wait_for_scripts: true, next_phase: :hands)
         when :hunting_scripts_start then prep([], @policy.hunting_script_list)
         when :hunting_scripts_stop
           stop_hunting(world)
@@ -2112,10 +2112,11 @@ module EO::Engine
         end
       end
 
-      def prep(commands, scripts, wait_for_scripts: false)
+      def prep(commands, scripts, wait_for_scripts: false, next_phase: :idle)
         @commands = commands
         @script_list = scripts
         @wait_for_scripts = wait_for_scripts
+        @after_prep = next_phase
         @remaining = nil
         @phase = :prep
         nil
@@ -2137,7 +2138,8 @@ module EO::Engine
 
       def step(world)
         result = case @phase
-                 when :prep then step_prep(world, @commands, @script_list, :idle, wait_for_scripts: @wait_for_scripts)
+                 when :prep then step_prep(world, @commands, @script_list, @after_prep, wait_for_scripts: @wait_for_scripts)
+                 when :hands then step_hands(world)
                  when :travel then step_travel(world, @rooms, :idle)
                  when :room then step_room(world, @room, :idle)
                  when :fog then step_fog(world)
@@ -2148,6 +2150,14 @@ module EO::Engine
           @after = nil
         end
         result
+      end
+
+      # After the hunting prep, the hunting hands, as the leader readies
+      # its own before the walk out (Rest#prepare_departure): ready before
+      # the trip, not on arrival. A failure is the loadout_stuck event's.
+      def step_hands(world)
+        @phase = :idle
+        @prepare_hands&.call(world)
       end
 
       # Rest's fixed successors, redirected to idle.

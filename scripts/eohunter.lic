@@ -404,7 +404,7 @@ module EOHunter
       end
     end
     if loadout
-      rest.prepare_hands = loadout.method(:prepare) unless member
+      rest.prepare_hands = loadout.method(:prepare)
       combat = behaviors[:engage]
       if combat.respond_to?(:equipment_interrupt=)
         urgent = behaviors.values_at(:survival, :cleanse, :flee).compact

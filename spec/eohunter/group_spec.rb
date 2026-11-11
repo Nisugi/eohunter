@@ -622,6 +622,16 @@ RSpec.describe EO::Engine::Behaviors::Orders do
     expect(fogged).to be_empty
   end
 
+  it 'readies its hunting hands after the hunting prep, before the walk out' do
+    steps = []
+    allow_any_instance_of(EO::Engine::Actions::Command).to receive(:send_through_ladder) { |_c, cmd| steps << cmd; 'ok' }
+    orders.prepare_hands = ->(_w) { steps << :hands; nil }
+    hub.broadcast(:hunting_prep, room: 1)
+    run
+    expect(steps).to eq(['stand', :hands])
+    expect(orders.phase).to eq(:idle)
+  end
+
   it 'runs follower resting scripts sequentially' do
     policy.resting_scripts = ['eherbs', 'eloot sell']
     hub.broadcast(:resting_scripts_start, room: 1)
