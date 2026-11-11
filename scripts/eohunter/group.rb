@@ -234,7 +234,7 @@ module EO::Engine
     # @!attribute at
     #   @return [Time, nil] when the report was made; the Hub stamps a nil
     Report = Struct.new(:name, :room, :rt, :hidden, :sneaky, :looting, :rest_prep_done, :rest_reason,
-                        :not_hunting_reason, :encumbrance_left, :wounded, :bounty, :at, keyword_init: true)
+                        :not_hunting_reason, :encumbrance_left, :wounded, :bounty, :aid, :at, keyword_init: true)
 
     # A member's bounty state for the report (the split plan's 3.1), from
     # Lich's Bounty task: :none, :hunting, :complete or :failed.
@@ -268,9 +268,11 @@ module EO::Engine
     #   group home instead of hunting on while the follower keeps failing
     # @param now [Time] the report's timestamp
     # @param encumbrance [Rest::Encumbrance, nil] persistent follower weight filter
+    # @param aid [Hash, nil] Cleanse::Aid.own: the remedies the follower can
+    #   cast at others and the ailments only it can see
     # @return [Report] the filled report
     def self.report(world, name:, rest_policy:, counters:, sneaky: false, looting: false, rest_prep_done: false, bounty: nil, forced: nil, now: Time.now,
-                    encumbrance: nil)
+                    encumbrance: nil, aid: nil)
       me = world.me
       overweight = encumbrance&.ready?(me.encumbrance_pct, threshold: rest_policy.encumbered_pct, looting: looting)
       Report.new(
@@ -280,7 +282,7 @@ module EO::Engine
         not_hunting_reason: Rest::Predicates.not_hunting_reason(me, rest_policy),
         encumbrance_left: rest_policy.encumbered_pct - me.encumbrance_pct.to_i,
         wounded: rest_policy.wounded ? (rest_policy.wounded.call ? true : false) : false,
-        bounty: bounty, at: now
+        bounty: bounty, aid: aid, at: now
       )
     end
 
@@ -967,14 +969,29 @@ module EO::Engine
       # @return [Boolean] true, from the Hub's heartbeat!
       # @param signs [Boolean] the leader is at the hunting room or hunting
       #   from it, where signs belong; false for the rest of the cycle
-      def publish(world, phase:, target: nil, signs: true)
+      # @param aid [Hash, nil] Cleanse::Aid.own for the leader; with it the
+      #   state carries the group's aid roster
+      def publish(world, phase:, target: nil, signs: true, aid: nil)
         return false if strict_movement? && !current_identity
 
         @last_state = {
           name: @name, room: world.room.id, phase: phase, looter: @looter, signs: signs,
-          target: target && { id: target.id.to_s, name: target.name.to_s, noun: target.noun.to_s }
+          target: target && { id: target.id.to_s, name: target.name.to_s, noun: target.noun.to_s },
+          aid: aid && merge_aid(aid)
         }
         @hub.heartbeat!(@last_state)
+      end
+
+      # The group's aid roster as last published: name => { helps:, ailments: }.
+      #
+      # @return [Hash{String => Hash}]
+      def aid_roster = (@last_state && @last_state[:aid]) || {}
+
+      # The leader's own entry and each online follower's last one.
+      def merge_aid(own)
+        roster = { @name => own }
+        reports.each { |name, r| roster[name] = r.aid if r.respond_to?(:aid) && r.aid }
+        roster
       end
 
       # Liveness apart from the tick: an action that blocks longer than
@@ -1525,6 +1542,8 @@ module EO::Engine
       def leader_target = @state[:target]
       # @return [String, nil] the assigned looter from the last known state
       def looter = @state[:looter]
+      # @return [Hash{String => Hash}] the group's aid roster from the last known state
+      def aid_roster = @state[:aid] || {}
 
       # The leader's rooms, fetched once and kept.
       #
