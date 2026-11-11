@@ -1254,7 +1254,7 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
     checks = 0
     allow_any_instance_of(EO::Engine::Actions::GroupCheck).to receive(:quiet_group) { checks += 1; ['You are leading Bob.'] }
     rest.start!
-    run_until(:done)
+    run_until(:done) { hub.ack(:cast_signs, 'Bob', hunt_id: hub.hunt_id) } # Bob answers any signs order
     expect(checks).to eq(0)
     rest.tick(world)
     expect(rest.phase).to eq(:hunting)
